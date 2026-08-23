@@ -98,8 +98,12 @@ function productCard(product: Product): string {
  * host to fail on camera. */
 function brandColors(brand: string): [string, string] {
   const palettes: [string, string][] = [
-    ['#1e3a8a', '#3b82f6'], ['#065f46', '#10b981'], ['#7c2d12', '#f97316'],
-    ['#581c87', '#a855f7'], ['#831843', '#ec4899'], ['#134e4a', '#14b8a6'],
+    ['#1e3a8a', '#3b82f6'],
+    ['#065f46', '#10b981'],
+    ['#7c2d12', '#f97316'],
+    ['#581c87', '#a855f7'],
+    ['#831843', '#ec4899'],
+    ['#134e4a', '#14b8a6'],
   ]
   let h = 0
   for (const ch of brand) h = (h * 31 + ch.charCodeAt(0)) >>> 0

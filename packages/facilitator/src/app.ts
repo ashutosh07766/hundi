@@ -2,12 +2,14 @@ import type { ScanResult } from '@hundi/cli/scanner'
 import type Database from 'better-sqlite3'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import type { ChooseProductArgs, ChooseProductResult } from '../../../agents/llm-brain/src/index.js'
 import type { BrowserScanResult } from './browser-scan.js'
 import type { Env } from './env.js'
 import { errorBody, RouteError } from './errors.js'
 import type { Executor } from './executor.js'
 import type { RazorpayClient } from './razorpay-client.js'
 import { registerAdminRoutes } from './routes/admin.js'
+import { registerAgentRoutes } from './routes/agent.js'
 import { registerApprovalRoutes } from './routes/approvals.js'
 import { registerCeremonyTokenRoutes } from './routes/ceremony-tokens.js'
 import { registerMandateRoutes } from './routes/mandates.js'
@@ -36,6 +38,11 @@ export type AppDeps = {
    * headless-browser scan (`browser-scan.ts`) at the route layer, overridable here so
    * tests can exercise the fallback path without launching a browser. */
   browserScan?: (url: string, merchantId: string) => Promise<BrowserScanResult>
+  /** The product-selection step behind POST /agent/select — defaults to the real
+   * `@hundi/llm-brain` `chooseProduct` at the route layer (see routes/agent.ts),
+   * overridable here so tests can exercise the LLM-configured response shape
+   * without a real chat-completions call. */
+  chooseProduct?: (args: ChooseProductArgs) => Promise<ChooseProductResult>
 }
 
 /** Builds the Hono app with `deps` injected — tests pass an in-memory db and a
@@ -64,6 +71,7 @@ export function createApp(deps: AppDeps): Hono {
   registerWebhookRoutes(app, deps)
   registerReadRoutes(app, deps)
   registerStoreRoutes(app, deps)
+  registerAgentRoutes(app, deps)
 
   return app
 }

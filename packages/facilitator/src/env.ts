@@ -27,6 +27,14 @@ const envSchema = z.object({
   // decision before the sweep abandons it — capped further by the mandate's own
   // expiry (see /approvals, which computes the same min() at decision time).
   APPROVAL_TTL_MS: z.coerce.number().int().positive().default(1_800_000),
+  // Optional OpenAI-compatible chat endpoint for POST /agent/select (see
+  // routes/agent.ts). All three or none — the route falls back to a cheapest-
+  // in-budget pick whenever any is missing, so an incomplete trio degrades
+  // visibly (via:'cheapest' in the response) rather than half-configuring a
+  // client that fails on first use.
+  LLM_BASE_URL: z.string().min(1).optional(),
+  LLM_API_KEY: z.string().min(1).optional(),
+  LLM_MODEL: z.string().min(1).optional(),
 })
 
 export type Env = z.infer<typeof envSchema>

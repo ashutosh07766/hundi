@@ -41,12 +41,17 @@ export const TEST_ENV: Env = {
  * share state" discipline. Returns the app plus the db/executor/razorpay handles tests
  * need to assert on directly (executor.calls, razorpay spies, or driving the db
  * out-of-band). `razorpay` defaults to the same in-memory fake executor-helpers.ts
- * tests use — pass one in to control fetchOrderPayments for webhook tests. */
+ * tests use — pass one in to control fetchOrderPayments for webhook tests. `env`
+ * overrides merge onto `TEST_ENV` — e.g. tests exercising POST /agent/select's
+ * LLM-configured path set `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL` here rather than
+ * mutating the shared `TEST_ENV` object other test files also import. */
 export function makeTestApp(
   opts: {
     razorpay?: RazorpayClient
     scanStore?: AppDeps['scanStore']
     browserScan?: AppDeps['browserScan']
+    chooseProduct?: AppDeps['chooseProduct']
+    env?: Partial<Env>
   } = {},
 ): {
   app: Hono
@@ -60,10 +65,11 @@ export function makeTestApp(
   const app = createApp({
     db,
     executor,
-    env: TEST_ENV,
+    env: { ...TEST_ENV, ...opts.env },
     razorpay,
     ...(opts.scanStore ? { scanStore: opts.scanStore } : {}),
     ...(opts.browserScan ? { browserScan: opts.browserScan } : {}),
+    ...(opts.chooseProduct ? { chooseProduct: opts.chooseProduct } : {}),
   })
   return { app, db, executor, razorpay }
 }

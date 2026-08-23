@@ -14,7 +14,7 @@ function defaultExpiryLocal(hoursFromNow: number): string {
 }
 
 export function MandateCeremony() {
-  const { human, dashboardToken } = useIdentity()
+  const { human, dashboardToken, humanSign, humanCredential } = useIdentity()
 
   const [goal, setGoal] = useState('')
   const [ceilingRupees, setCeilingRupees] = useState('2000')
@@ -74,7 +74,7 @@ export function MandateCeremony() {
 
     setBusy(true)
     try {
-      const ceremony = buildSignedIntent(
+      const ceremony = await buildSignedIntent(
         {
           goal,
           ceilingPaise: rupeesToPaise(Number(ceilingRupees)),
@@ -83,7 +83,8 @@ export function MandateCeremony() {
           expiresAt,
           agentPubkeyHex: agentPubkey,
         },
-        human,
+        humanSign,
+        humanCredential(),
       )
       const ceremonyToken = await mintCeremonyToken(dashboardToken)
       const { mandateId } = await registerMandate(

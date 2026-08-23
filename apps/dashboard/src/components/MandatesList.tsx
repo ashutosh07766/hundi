@@ -18,14 +18,14 @@ function safeParseIntent(intentJson: string): IntentMandate | null {
 }
 
 export function MandatesList() {
-  const { human } = useIdentity()
+  const { humanSign } = useIdentity()
   const { data: mandates, error: pollError, loading } = usePolling(listMandates, 2000)
   const [statusById, setStatusById] = useState<Record<string, RowStatus>>({})
 
   async function revoke(mandateId: string) {
     setStatusById((prev) => ({ ...prev, [mandateId]: { pending: true, error: null } }))
     try {
-      const sig = signRevoke(mandateId, human)
+      const sig = await signRevoke(mandateId, humanSign)
       await postRevoke({ mandateId, sig })
       setStatusById((prev) => ({ ...prev, [mandateId]: { pending: false, error: null } }))
     } catch (err) {

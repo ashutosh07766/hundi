@@ -101,6 +101,19 @@ code,
   width: 160px;
 }
 
+.identity-bar__notice {
+  margin: 0;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+}
+
+.signer-toggle {
+  display: flex;
+  gap: 4px;
+}
+
 /* Tabs */
 .tabs {
   display: flex;
@@ -255,6 +268,11 @@ input:focus {
 .btn--small {
   padding: 4px 10px;
   font-size: 12px;
+}
+
+.btn--active {
+  border-color: var(--accent-dim);
+  color: var(--accent);
 }
 
 /* Banners */

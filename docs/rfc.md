@@ -58,25 +58,37 @@ signature types behind one interface: `ed25519` and `webauthn-es256`. Both
 are implemented and unit-tested, including the ES256 path's exact WebAuthn
 shape — verifying over `authenticatorData || SHA-256(clientDataJSON)`
 against a P-256 JWK, matching how a platform passkey actually signs.
-**What's wired end-to-end today is the Ed25519 path only**: the dashboard
-holds a raw Ed25519 keypair standing in for "the human," and every agent
-identity in the demo is its own Ed25519 keypair. The passkey ceremony UI
-(the browser-side `navigator.credentials` flow) is not built — the
-verification math it would call already exists and is tested, but nothing
-in the dashboard invokes it yet. This is disclosed, not hidden: a demo run
-that shows a raw-keypair "human" signer is not simulating anything the
-server-side gate doesn't actually enforce.
+**Both paths are now wired end-to-end.** The dashboard's default human
+signer is still a raw Ed25519 keypair held in the page's JS heap — every
+agent identity in the demo is also its own Ed25519 keypair, and that stays
+the default with zero setup. Opt-in, via a signer toggle in the identity
+bar, the human signer can instead be a registered WebAuthn passkey
+(`apps/dashboard/src/lib/webauthn.ts`): the browser runs the real
+`navigator.credentials.create`/`.get()` ceremony, extracts the resulting
+P-256 public key (from `AuthenticatorAttestationResponse.getPublicKey()`
+where available, or by decoding the COSE key out of `authenticatorData`
+otherwise), and signs mandate/approval/revocation payloads as WebAuthn
+assertions from then on. The private key never leaves the authenticator —
+the page only ever sees a public key and, per-signature, an assertion. No
+server-side WebAuthn library is involved; `packages/core`'s existing
+verifier is the sole judge of a passkey-produced signature, same as it
+always was. This is disclosed, not hidden: the packaging from browser
+assertion to `SigEnvelope` is proven correct in CI against synthetic
+assertions (no authenticator hardware in CI) — an actual hardware run
+(real Touch ID / Windows Hello / Android biometric ceremony end-to-end
+through the dashboard) still needs a human to click through it once on
+real hardware to confirm.
 
 ## Diff table
 
 | | AP2 v0.2 | ACP (2026-04-17) | x402 | UCP | Reserve Pay / UAP | **Hundi** |
 |---|---|---|---|---|---|---|
 | Governance | FIDO Alliance (donated Apr 2026) | OpenAI/agentic-commerce ecosystem | Linux Foundation (`x402-foundation/x402`) | Shopify | Razorpay × NPCI | this repo |
-| Credential shape | two SD-JWT mandates (Checkout, Payment; open/closed variants), linked by `checkout_hash` | allowance object (`reason: one_time`, `max_amount`, `currency`, `merchant_id`, `expires_at`, `checkout_session_id`) | none — a 402 challenge/response per request | checkout state object, no mandate concept | per-merchant spending cap set at enrollment, revocable | two hash-linked mandates (Intent, Cart), Ed25519 today / ES256 verified-but-unwired |
+| Credential shape | two SD-JWT mandates (Checkout, Payment; open/closed variants), linked by `checkout_hash` | allowance object (`reason: one_time`, `max_amount`, `currency`, `merchant_id`, `expires_at`, `checkout_session_id`) | none — a 402 challenge/response per request | checkout state object, no mandate concept | per-merchant spending cap set at enrollment, revocable | two hash-linked mandates (Intent, Cart), Ed25519 by default / ES256 via opt-in passkey |
 | Who signs the cart | the **merchant** attests contents/price | n/a (allowance, not a cart signature) | n/a | n/a | n/a | the **agent**, cross-checked against the facilitator's own merchant-price registry |
 | Idempotency | — | native `Idempotency-Key` header | — | — | — | caller `Idempotency-Key` header **and** our own `mandate_cart_hash` business-uniqueness check — Razorpay's own rail gave us neither |
 | Settlement split | — | — | `/verify` + `/settle`, crypto-rails only | `requires_escalation` → `continue_url` handoff | rail-level cap enforcement, no public API | `/verify` (stateless dry-run) + facilitator-internal settle; no agent-facing settle endpoint exists at all |
-| Signature scheme | ES256 (passkey-native) | n/a | wallet signature | n/a | UPI PIN / AFA | ES256 verifier built + tested; Ed25519 is what's actually signing in this build |
+| Signature scheme | ES256 (passkey-native) | n/a | wallet signature | n/a | UPI PIN / AFA | Ed25519 (default) or ES256 via an opt-in passkey ceremony — both verified by the same gate |
 | Rail | any (protocol-level) | any | crypto only | any | UPI, live | Razorpay test mode, fiat |
 | Status | spec, FIDO-governed | spec | spec + reference implementation | shipped at Shopify | Reserve Pay: live pilot (Zomato/Swiggy/Zepto, Feb 2026). UAP: not public, pending RBI approval | working code, this repo, test mode |
 
@@ -141,9 +153,15 @@ Razorpay primitives, ahead of a rail-native version arriving.
   model (one IntentMandate → at most one captured purchase), not by a
   request-rate guard. A missing rate limit doesn't currently translate into
   unbounded spend, but it is not defended in depth.
-- **Passkey ceremony is future work.** See "Signature envelope" above —
-  the verification path is real and tested; the browser ceremony that would
-  produce a passkey-signed mandate is not built.
+- **Passkey ceremony is implemented, opt-in, hardware-unverified.** See
+  "Signature envelope" above — both the verification path and the browser
+  ceremony now exist, and the packaging between them is proven correct in
+  CI against synthetic assertions. What CI cannot prove is a real
+  authenticator: no platform authenticator is available in a CI runner, so
+  the actual `navigator.credentials.create`/`.get()` round trip against
+  Touch ID / Windows Hello / Android biometrics has not been exercised
+  end-to-end. A human needs to click through the signer toggle on real
+  hardware once to close that gap.
 
 ## Payment rail reality
 

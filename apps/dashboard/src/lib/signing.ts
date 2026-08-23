@@ -1,15 +1,16 @@
 /**
  * Ed25519 keypair + signing for "the human" identity the dashboard holds.
  *
- * KTD15: in a real deployment the human signs mandates and decisions via a
- * platform passkey (webauthn-es256, already a first-class credential type in
- * @hundi/core) — the private key never leaves a secure enclave. For this
- * demo the dashboard generates and stores a raw Ed25519 keypair itself and
- * signs directly, so the human console can act as its own trust root without
- * a webauthn ceremony. The signing math mirrors core's verifyEd25519 exactly
- * (sha256 digest, then raw Ed25519 over the digest) — see
- * packages/core/src/signature.ts — because core's verifier is the sole judge
- * of whether a signature this module produces is valid.
+ * This is the DEFAULT human signer — a raw keypair generated and stored by
+ * the page itself, so the console can act as its own trust root with zero
+ * setup. The private key lives in the page's JS heap for as long as the tab
+ * is open. `webauthn.ts` + `human-signer.ts` provide an opt-in alternative
+ * (a platform passkey) where the private key never leaves the authenticator
+ * — strictly stronger, but it requires hardware and a registration step, so
+ * this path stays the default. The signing math mirrors core's
+ * verifyEd25519 exactly (sha256 digest, then raw Ed25519 over the digest) —
+ * see packages/core/src/signature.ts — because core's verifier is the sole
+ * judge of whether a signature this module produces is valid.
  */
 
 import type { SigEnvelope } from '@hundi/core'

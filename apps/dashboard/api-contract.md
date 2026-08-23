@@ -87,3 +87,23 @@ status.
 
 Backed directly by `verifyLedger(db)` from `ledger.ts` — no new logic needed,
 just an HTTP wrapper.
+
+## Human signer identity (write endpoints)
+
+The write endpoints above accept whichever `Credential` the dashboard's
+currently active human signer resolves to — the facilitator's schema layer
+already validates both shapes (`packages/facilitator/src/schemas.ts`), so no
+facilitator change was needed to add the second one:
+
+- `{ type: 'ed25519', publicKey_hex }` — the default. A raw Ed25519 keypair
+  generated and held in the page's JS heap (`lib/signing.ts`).
+- `{ type: 'webauthn-es256', publicKey_jwk }` — opt-in. A registered
+  platform passkey; the private key never leaves the authenticator
+  (`lib/webauthn.ts`). Selected via the signer toggle in `IdentityBar`.
+
+Which credential a given mandate carries is fixed at ceremony time (whatever
+`humanCredential()` resolved to when `POST /mandates` ran) — approvals and
+revocations for that mandate must come from the same identity, since the
+facilitator verifies against the mandate's originally registered credential,
+not against whatever signer is currently active in the dashboard. See
+`lib/human-signer.ts` for the dispatch logic.

@@ -30,7 +30,7 @@ async function loadPending(): Promise<Loaded> {
 }
 
 export function PendingApprovals() {
-  const { human } = useIdentity()
+  const { humanSign } = useIdentity()
   const { data, error: pollError, loading } = usePolling(loadPending, 2000)
   const [statusById, setStatusById] = useState<Record<string, RowStatus>>({})
 
@@ -40,13 +40,13 @@ export function PendingApprovals() {
       [settlement.id]: { pending: true, error: null, success: null },
     }))
     try {
-      const sig = signApprovalDecision(
+      const sig = await signApprovalDecision(
         {
           settlementId: settlement.id,
           mandateCartHashHex: settlement.mandate_cart_hash_hex,
           decision,
         },
-        human,
+        humanSign,
       )
       const result = await postApproval({
         settlement_id: settlement.id,

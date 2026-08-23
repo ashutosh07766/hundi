@@ -175,3 +175,51 @@ export async function postRevoke(args: {
 }): Promise<{ mandateId: string; alreadyRevoked?: boolean }> {
   return postJson('/revoke', args)
 }
+
+export type MandateProposalStatus = 'pending' | 'consumed' | 'expired'
+
+export type MandateProposal = {
+  id: string
+  merchant_id: string
+  goal: string
+  ceiling_paise: number
+  approval_threshold_paise: number
+  currency: string
+  agent_pubkey_hex: string
+  expires_at: number
+  status: MandateProposalStatus
+  created_at: number
+  /** Server-composed human-readable one-liner — render as-is, don't reconstruct client-side. */
+  summary: string
+}
+
+/** GET /mandates/proposals[?status=] — no dashboard token required; this is the same
+ * read every un-authenticated approve_url visitor needs to be able to load. */
+export async function listMandateProposals(
+  status?: MandateProposalStatus,
+): Promise<MandateProposal[]> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : ''
+  const { proposals } = await request<{ proposals: MandateProposal[] }>(`/mandates/proposals${qs}`)
+  return proposals
+}
+
+/** GET /mandates/proposals/:id */
+export async function getMandateProposal(id: string): Promise<MandateProposal> {
+  const { proposal } = await request<{ proposal: MandateProposal }>(
+    `/mandates/proposals/${encodeURIComponent(id)}`,
+  )
+  return proposal
+}
+
+/** POST /mandates/proposals/:id/consume — dashboard-token-gated. Called right after the
+ * proposal's real mandate registers successfully via POST /mandates. */
+export async function consumeMandateProposal(
+  id: string,
+  dashboardToken: string,
+): Promise<{ proposal: MandateProposal }> {
+  return postJson(
+    `/mandates/proposals/${encodeURIComponent(id)}/consume`,
+    {},
+    { 'x-hundi-dashboard-token': dashboardToken },
+  )
+}

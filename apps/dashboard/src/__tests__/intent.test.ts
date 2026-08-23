@@ -1,7 +1,12 @@
 import { canonicalJson, intentSigningBytes, verifyMandateSignature } from '@hundi/core'
 import { describe, expect, it } from 'vitest'
-import type { HumanSign } from '../lib/intent.js'
-import { buildSignedIntent, signApprovalDecision, signRevoke } from '../lib/intent.js'
+import type { HumanSign, MandateProposalForIntent } from '../lib/intent.js'
+import {
+  buildSignedIntent,
+  ceremonyInputFromProposal,
+  signApprovalDecision,
+  signRevoke,
+} from '../lib/intent.js'
 import type { HumanKeypair } from '../lib/signing.js'
 import { generateKeypair, signBytes } from '../lib/signing.js'
 
@@ -111,6 +116,54 @@ describe('buildSignedIntent', () => {
     const a = await buildSignedIntent(input, sign, credential)
     const b = await buildSignedIntent(input, sign, credential)
     expect(a.intent.mandateId).not.toBe(b.intent.mandateId)
+  })
+})
+
+describe('ceremonyInputFromProposal', () => {
+  const proposal: MandateProposalForIntent = {
+    goal: 'shop Frido',
+    ceiling_paise: 500_000,
+    approval_threshold_paise: 500_000,
+    merchant_id: 'myfrido-com',
+    agent_pubkey_hex: AGENT_PUBKEY,
+    expires_at: 1_800_000_000,
+  }
+
+  it('maps paise fields straight through — no rupee conversion', () => {
+    const input = ceremonyInputFromProposal(proposal)
+    expect(input.ceilingPaise).toBe(500_000)
+    expect(input.approvalThresholdPaise).toBe(500_000)
+    expect(Number.isInteger(input.ceilingPaise)).toBe(true)
+    expect(Number.isInteger(input.approvalThresholdPaise)).toBe(true)
+  })
+
+  it("carries the proposal's own agent_pubkey_hex — never mints or substitutes a fresh key", () => {
+    const input = ceremonyInputFromProposal(proposal)
+    expect(input.agentPubkeyHex).toBe(AGENT_PUBKEY)
+  })
+
+  it('scopes merchants to exactly the proposal single merchant_id', () => {
+    const input = ceremonyInputFromProposal(proposal)
+    expect(input.merchants).toEqual(['myfrido-com'])
+  })
+
+  it('carries goal and expiresAt straight through', () => {
+    const input = ceremonyInputFromProposal(proposal)
+    expect(input.goal).toBe('shop Frido')
+    expect(input.expiresAt).toBe(1_800_000_000)
+  })
+
+  it('feeds buildSignedIntent to produce a mandate core.verifyMandateSignature accepts', async () => {
+    const human = generateKeypair()
+    const { intent, credential } = await buildSignedIntent(
+      ceremonyInputFromProposal(proposal),
+      ed25519Signer(human),
+      ed25519Credential(human),
+    )
+    expect(intent.agent_pubkey_hex).toBe(AGENT_PUBKEY)
+    expect(intent.merchants).toEqual(['myfrido-com'])
+    const bytes = intentSigningBytes(intent)
+    expect(verifyMandateSignature(bytes, intent.sig, credential)).toBe(true)
   })
 })
 

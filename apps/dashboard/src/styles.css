@@ -816,6 +816,34 @@ input::placeholder {
   background: linear-gradient(180deg, var(--warn-soft) 0%, var(--bg-elev-2) 90px);
 }
 
+/* Proposal cards (conversational mandate setup) */
+.proposal-card {
+  border-color: var(--accent-dim);
+  background: linear-gradient(180deg, var(--accent-soft) 0%, var(--bg-elev-2) 90px);
+}
+
+.proposal-card--highlighted {
+  border-width: 2px;
+  box-shadow: var(--shadow-elev);
+}
+
+.proposal-card__summary {
+  margin: var(--space-2) 0 0;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.proposal-card__disclosure {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
 .decision-card__amount {
   display: flex;
   align-items: baseline;

@@ -62,6 +62,35 @@ export async function buildSignedIntent(
   return { intent: { ...unsigned, sig }, credential }
 }
 
+/** The subset of a facilitator mandate proposal (GET /mandates/proposals/:id) needed to
+ * build its intent — kept narrow so this module doesn't import the full `lib/api.ts`
+ * `MandateProposal` type, avoiding a dependency cycle between the two. */
+export type MandateProposalForIntent = {
+  goal: string
+  ceiling_paise: number
+  approval_threshold_paise: number
+  merchant_id: string
+  agent_pubkey_hex: string
+  expires_at: number
+}
+
+/** Maps a facilitator mandate proposal directly onto `buildSignedIntent`'s paise-
+ * denominated `CeremonyInput` — no rupee conversion happens here, because a proposal
+ * (packages/facilitator's mandate_proposals table) already stores paise. Carries
+ * `agent_pubkey_hex` straight from the proposal: unlike the manual ceremony's blank-
+ * field fallback, a proposal always names a specific agent (the one that called
+ * prepare_mandate) and this never mints a fresh key in its place. */
+export function ceremonyInputFromProposal(proposal: MandateProposalForIntent): CeremonyInput {
+  return {
+    goal: proposal.goal,
+    ceilingPaise: proposal.ceiling_paise,
+    approvalThresholdPaise: proposal.approval_threshold_paise,
+    merchants: [proposal.merchant_id],
+    expiresAt: proposal.expires_at,
+    agentPubkeyHex: proposal.agent_pubkey_hex,
+  }
+}
+
 /** Signs an approval/rejection decision — POST /approvals verifies this against the
  * mandate's registered credential, so the payload shape must match exactly what
  * approvals.ts recomputes: `{ settlement_id, mandate_cart_hash_hex, decision }`. */

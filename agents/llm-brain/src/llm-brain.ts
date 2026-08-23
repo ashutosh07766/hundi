@@ -1,0 +1,284 @@
+/**
+ * The provider-agnostic LLM buyer policy: search, hand the candidate list to
+ * whichever OpenAI-compatible chat model is configured for a reasoned pick,
+ * then run the exact same propose-cart / request-payment sequence the
+ * scripted and Claude brains use. This module changes only *which* product
+ * gets chosen — `BuyerTools` is the entire capability surface available to
+ * it, so the money path (cart signing, facilitator submission, polling) is
+ * byte-identical across every brain. Swapping this brain in never grants a
+ * new capability, and swapping the LLM provider underneath it (Groq, Gemini,
+ * OpenRouter, Ollama, ...) never changes this module at all.
+ *
+ * The model only ever sees structured catalog fields (id/title/description/
+ * price_paise/availability/brand) — never `injectedPayload` (see `Product` in
+ * agent-tools.ts) — but that omission is defense in depth, not the real
+ * guard. The real guard is structural: `resolveChoice` below only ever builds
+ * a cart from a listing's own `price_paise`/`merchant_id` (via
+ * `tools.proposeCart`), so even a model call fully fooled by adversarial
+ * description text can't smuggle an attacker-controlled price or merchant
+ * into the cart. A pick that fails validation (unknown sku, out of stock,
+ * over the goal's local ceiling) never reaches `proposeCart` — it's replaced
+ * by the same cheapest-in-stock-under-ceiling rule the scripted brain uses,
+ * before any cart is built.
+ */
+
+import type { BuyerTools, Product, SettlementResult } from '../../scripted-brain/src/agent-tools.js'
+import type { AgentKeypair } from '../../scripted-brain/src/ed25519.js'
+import type {
+  LogStep,
+  PurchaseMandate,
+  PurchaseOutcome,
+} from '../../scripted-brain/src/scripted-brain.js'
+import { chatJson } from './llm-client.js'
+
+export type LlmGoal = {
+  query: string
+  ceiling_paise: number
+  threshold_paise: number
+}
+
+export type LlmConfig = {
+  baseUrl: string
+  apiKey: string
+  model: string
+}
+
+export type LlmPurchaseArgs = {
+  goal: LlmGoal
+  mandate: PurchaseMandate
+  config?: LlmConfig
+}
+
+/** The minimal surface `runLlmPurchase` calls — narrow enough that tests can
+ * inject a fake without a real HTTP round trip, wide enough that the default
+ * client built from `LlmConfig` (a thin wrapper over `chatJson`) satisfies it
+ * as-is. */
+export type ChatClient = {
+  chatJson(args: {
+    system: string
+    user: string
+  }): Promise<{ chosen_sku?: string; reason?: string }>
+}
+
+export type LlmBrainDeps = {
+  /** Overrides the default OpenAI-compatible client — tests inject a fake
+   * here so no fetch ever happens. When omitted, `config` is required and a
+   * real client is built from it. */
+  chat?: ChatClient
+  log?: LogStep
+}
+
+const defaultLog: LogStep = (step, data) => {
+  console.log(JSON.stringify({ step, ...data }))
+}
+
+type LlmPick = { chosen_sku: string; reason: string }
+
+/** Every reason `resolveChoice` can fall back to the scripted rule for —
+ * logged verbatim so a demo transcript shows exactly why an override
+ * happened. */
+type GuardrailOverrideReason =
+  | 'NO_LLM_PICK'
+  | 'SKU_NOT_IN_CANDIDATES'
+  | 'OUT_OF_STOCK'
+  | 'OVER_CEILING'
+
+type ResolvedChoice = {
+  product: Product | undefined
+  overridden: boolean
+  overrideReason?: GuardrailOverrideReason
+  llmReason?: string
+}
+
+/** Runs one LLM-brain purchase attempt against `tools` for `goal`, authorized
+ * by `mandate`. Mirrors `runPurchase` in scripted-brain.ts step-for-step
+ * (same log step names, same `PurchaseOutcome` shape) so a harness or demo
+ * can swap brains without touching call sites — only the `select` step's
+ * reasoning differs. */
+export async function runLlmPurchase(
+  { goal, mandate, config }: LlmPurchaseArgs,
+  tools: BuyerTools,
+  deps: LlmBrainDeps = {},
+): Promise<PurchaseOutcome> {
+  const log = deps.log ?? defaultLog
+  const chat = deps.chat ?? buildDefaultChatClient(config)
+
+  const candidates = await tools.searchCatalog(goal.query)
+  log('search', { query: goal.query, resultCount: candidates.length })
+
+  const pick = await askLlm(chat, goal, candidates)
+  const resolved = resolveChoice(pick, candidates, goal, log)
+
+  const { product } = resolved
+  if (!product) {
+    log('select', { outcome: 'no_candidate' })
+    return { status: 'blocked', reason: 'NO_CANDIDATE' }
+  }
+  log('select', {
+    sku: product.id,
+    title: product.title,
+    price_paise: product.price_paise,
+    llm_reason: resolved.llmReason ?? null,
+    overridden: resolved.overridden,
+    override_reason: resolved.overrideReason ?? null,
+  })
+
+  const cart = tools.proposeCart([{ product, qty: 1 }])
+  log('propose_cart', { merchant_id: cart.merchant_id, total_paise: cart.total_paise })
+
+  const willLikelyNeedApproval = cart.total_paise > goal.threshold_paise
+  log('request_payment', { willLikelyNeedApproval })
+  const settlement = await tools.requestPayment({
+    intent: mandate.intent,
+    cart,
+    agent: mandate.agent,
+  })
+  log('settlement_created', {
+    settlement_id: settlement.settlement_id,
+    state: settlement.state,
+    reason: settlement.reason ?? null,
+  })
+
+  if (settlement.state === 'pending_approval' && tools.recordDecision) {
+    await recordRationale(tools, settlement, product, resolved, mandate.agent, log)
+  }
+
+  const outcome = toOutcome(settlement, product)
+  log('outcome', outcome)
+  return outcome
+}
+
+/** Builds the real `ChatClient` from `config`, deferring the `chatJson` call
+ * (and thus any I/O) until a purchase actually asks for a pick. Throws
+ * immediately — rather than silently degrading to some default endpoint — if
+ * neither a fake `deps.chat` nor a `config` was supplied; there is no safe
+ * default provider to fall back to. */
+function buildDefaultChatClient(config: LlmConfig | undefined): ChatClient {
+  if (!config) {
+    throw new Error('runLlmPurchase: either deps.chat or config (baseUrl/apiKey/model) is required')
+  }
+  return {
+    chatJson: (args) => chatJson({ ...config, ...args }),
+  }
+}
+
+async function recordRationale(
+  tools: BuyerTools,
+  settlement: SettlementResult,
+  product: Product,
+  resolved: ResolvedChoice,
+  agent: AgentKeypair,
+  log: LogStep,
+): Promise<void> {
+  const rationale = resolved.overridden
+    ? `guardrail override (${resolved.overrideReason}): fell back to cheapest in-stock match under the goal ceiling`
+    : (resolved.llmReason ?? 'LLM selection')
+  try {
+    await tools.recordDecision?.({
+      settlementId: settlement.settlement_id,
+      payload: { rationale, sku: product.id, price_paise: product.price_paise },
+      agent,
+    })
+    log('decision_rationale', { posted: true, settlement_id: settlement.settlement_id })
+  } catch (err) {
+    log('decision_rationale', {
+      posted: false,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
+/** Asks the model to pick one product from the full candidate list (in stock
+ * or not — the guardrail below is what actually enforces stock/price, not
+ * the prompt) and return `{chosen_sku, reason}`. Returns `undefined` on any
+ * malformed or missing response; callers must always fall back rather than
+ * trust an unparsed pick. */
+async function askLlm(
+  chat: ChatClient,
+  goal: LlmGoal,
+  candidates: Product[],
+): Promise<LlmPick | undefined> {
+  const { system, user } = buildPrompt(goal, candidates)
+  const pick = await chat.chatJson({ system, user })
+  return pick.chosen_sku ? { chosen_sku: pick.chosen_sku, reason: pick.reason ?? '' } : undefined
+}
+
+function buildPrompt(goal: LlmGoal, candidates: Product[]): { system: string; user: string } {
+  const listing = candidates.map((p) => ({
+    id: p.id,
+    title: p.title,
+    description: p.description,
+    price_paise: p.price_paise,
+    availability: p.availability.status,
+    brand: p.brand,
+  }))
+  const system =
+    'You are a careful shopping assistant. Pick the single best-fitting product for the ' +
+    "shopper's stated goal from a JSON candidate list. Respond with ONLY a JSON object of " +
+    'the shape {"chosen_sku": string, "reason": string} — no markdown, no other text. ' +
+    '"reason" is one sentence explaining the fit.'
+  const user = [
+    `Shopper goal: "${goal.query}"`,
+    `Maximum budget: ${goal.ceiling_paise} paise.`,
+    `Candidates: ${JSON.stringify(listing)}`,
+  ].join('\n')
+  return { system, user }
+}
+
+/** cheapest in-stock match under the goal's local ceiling — the same rule
+ * scripted-brain.ts's runPurchase uses. Every brain converges on identical
+ * behavior when the LLM's pick fails validation or never arrives. */
+function fallbackPick(candidates: Product[], ceiling_paise: number): Product | undefined {
+  return candidates
+    .filter((p) => p.availability.status === 'in_stock' && p.price_paise <= ceiling_paise)
+    .sort((a, b) => a.price_paise - b.price_paise)[0]
+}
+
+/** Validates the model's pick against the real candidate list before it's
+ * allowed anywhere near `proposeCart`. Any failure here — unknown sku, out of
+ * stock, over the local ceiling, or no parseable pick at all — replaces the
+ * pick with `fallbackPick` and records why. */
+function resolveChoice(
+  pick: LlmPick | undefined,
+  candidates: Product[],
+  goal: LlmGoal,
+  log: LogStep,
+): ResolvedChoice {
+  if (!pick) {
+    return override('NO_LLM_PICK', candidates, goal, log)
+  }
+
+  const chosen = candidates.find((p) => p.id === pick.chosen_sku)
+  if (!chosen) {
+    return override('SKU_NOT_IN_CANDIDATES', candidates, goal, log, pick)
+  }
+  if (chosen.availability.status !== 'in_stock') {
+    return override('OUT_OF_STOCK', candidates, goal, log, pick)
+  }
+  if (chosen.price_paise > goal.ceiling_paise) {
+    return override('OVER_CEILING', candidates, goal, log, pick)
+  }
+  return { product: chosen, overridden: false, llmReason: pick.reason }
+}
+
+function override(
+  reason: GuardrailOverrideReason,
+  candidates: Product[],
+  goal: LlmGoal,
+  log: LogStep,
+  pick?: LlmPick,
+): ResolvedChoice {
+  log('guardrail_override', { reason, llm_chosen_sku: pick?.chosen_sku ?? null })
+  const product = fallbackPick(candidates, goal.ceiling_paise)
+  return pick?.reason === undefined
+    ? { product, overridden: true, overrideReason: reason }
+    : { product, overridden: true, overrideReason: reason, llmReason: pick.reason }
+}
+
+function toOutcome(settlement: SettlementResult, product: Product): PurchaseOutcome {
+  if (settlement.state === 'captured') return { status: 'completed', product, settlement }
+  if (settlement.state === 'pending_approval') {
+    return { status: 'pending_approval', product, settlement }
+  }
+  return { status: 'blocked', reason: settlement.reason ?? settlement.state, product, settlement }
+}

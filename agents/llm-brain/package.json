@@ -1,0 +1,21 @@
+{
+  "name": "@hundi/llm-brain",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "buy": "tsx --env-file=../../.env src/index.ts",
+    "smoke:llm": "tsx --env-file=../../.env bin/smoke-llm.ts"
+  },
+  "dependencies": {
+    "@hundi/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "tsx": "^4.20.0",
+    "vitest": "^4.0.0"
+  }
+}

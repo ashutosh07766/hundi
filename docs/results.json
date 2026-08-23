@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-23T11:52:25.527Z",
+  "generatedAt": "2026-08-23T12:32:49.289Z",
   "taskCount": 20,
   "matched": 20,
   "matchRatePct": 100,
@@ -12,8 +12,8 @@
     "settled-on-retry": 1,
     "blocked": 2
   },
-  "wallClockMs": 2764,
-  "ledgerHeadHash": "d255a0dba3b9f9d099b98eca4f7c12c1b4c877f7589cea777074d87f6931ef97",
+  "wallClockMs": 2408,
+  "ledgerHeadHash": "cb9e6ca273df86079db8081680f65dad60d186aa1076a47a8b154fdf72679c22",
   "rows": [
     {
       "id": "happy-1",

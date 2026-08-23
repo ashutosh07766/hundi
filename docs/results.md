@@ -33,6 +33,6 @@ Measured on the deterministic scripted settlement driver (see packages/harness/s
 - Matched oracle: 20 (100.0%)
 - Mismatches: 0
 - Bucket counts: {"settled":8,"rejected":3,"HITL-approved":3,"HITL-rejected":2,"recovered":1,"settled-on-retry":1,"blocked":2}
-- Wall clock: 2764ms
-- Ledger head hash: `d255a0dba3b9f9d099b98eca4f7c12c1b4c877f7589cea777074d87f6931ef97`
+- Wall clock: 2408ms
+- Ledger head hash: `cb9e6ca273df86079db8081680f65dad60d186aa1076a47a8b154fdf72679c22`
 

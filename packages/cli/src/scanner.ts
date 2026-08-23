@@ -11,12 +11,33 @@ import { isPrivateOrLoopbackIp } from './ip-guard.js'
 
 export type Availability = 'in_stock' | 'out_of_stock'
 
+/** One purchasable SKU within a product (e.g. a specific size/color). Prices and
+ * stock are per-variant — a product's own `price_paise`/`availability` reflect only
+ * its first variant, so any consumer that needs to let a buyer pick a specific size
+ * or color must read `variants`, not the product-level fields. */
+export type ScannedVariant = {
+  variant_id: string
+  /** Shopify's own variant title (e.g. "11 / Black") — display-only. */
+  label: string
+  /** One value per product option, same order as `ScannedProduct.options` (e.g.
+   * `["11", "Black"]` for options `[{name:"Size",...},{name:"Color",...}]`). */
+  option_values: string[]
+  price_paise: number
+  available: boolean
+  sku?: string
+}
+
+export type ScannedOption = { name: string; values: string[] }
+
 export type ScannedProduct = {
   sku: string
   name: string
   description: string
   /** Integer paise, converted from the schema.org decimal-rupee price string
-   * at parse time — every downstream consumer works in integers only. */
+   * at parse time — every downstream consumer works in integers only. For a
+   * multi-variant Shopify product this is the first variant's price (legacy
+   * flat-catalog behavior); a consumer that needs a specific variant's price
+   * must read `variants`. */
   price_paise: number
   currency: string
   availability: Availability
@@ -25,6 +46,16 @@ export type ScannedProduct = {
   /** The page this product was extracted from — kept for traceability and as
    * the fallback source for a derived sku. */
   url: string
+  /** Every purchasable variant, present only for a Shopify product with more than
+   * one variant (a single "Default Title" variant carries no real size/color
+   * choice, so it's left undefined rather than emitted as a one-item array — this
+   * is what lets a consumer branch on "does this product have real options" with
+   * a plain truthiness check). Absent entirely on the schema.org JSON-LD path,
+   * which carries no variant data at all. */
+  variants?: ScannedVariant[]
+  /** The product-level option definitions (e.g. `[{name:"Size",values:["9","10","11"]}]`)
+   * a Shopify product's variants are built from. Same presence rule as `variants`. */
+  options?: ScannedOption[]
 }
 
 export type ScanResult = {
@@ -369,6 +400,61 @@ function truncate(text: string, maxChars: number): string {
   return text.length > maxChars ? `${text.slice(0, maxChars).trimEnd()}…` : text
 }
 
+/** Maps a Shopify product's `options` array (`[{name:"Size",values:["9","10"]}]`)
+ * onto `ScannedOption[]`, dropping any entry missing a usable name. Returns
+ * `undefined` for a missing/malformed/empty array so callers can gate on
+ * presence with a plain truthiness check. */
+function buildScannedOptions(raw: unknown): ScannedOption[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const options: ScannedOption[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const obj = entry as Record<string, unknown>
+    if (typeof obj.name !== 'string' || obj.name.length === 0) continue
+    const values = Array.isArray(obj.values)
+      ? obj.values.filter((v): v is string => typeof v === 'string')
+      : []
+    options.push({ name: obj.name, values })
+  }
+  return options.length > 0 ? options : undefined
+}
+
+/** Maps a Shopify product's raw `variants[]` onto `ScannedVariant[]`, reading
+ * `option1`/`option2`/`option3` into `option_values` (Shopify's own variant shape
+ * carries options positionally, not as named fields). A variant missing a usable
+ * id or price is dropped rather than aborting the whole product. Returns
+ * `undefined` when fewer than two usable variants remain — a lone "Default
+ * Title" variant carries no real size/color choice, so it collapses to the
+ * legacy flat-product shape instead of a one-item variants array. */
+function buildScannedVariants(raw: Record<string, unknown>[]): ScannedVariant[] | undefined {
+  const variants: ScannedVariant[] = []
+  for (const variant of raw) {
+    const id = variant.id
+    const variantId = typeof id === 'number' || typeof id === 'string' ? String(id) : undefined
+    const price = toPaise(variant.price)
+    if (!variantId || price === undefined) continue
+
+    const optionValues = [variant.option1, variant.option2, variant.option3].filter(
+      (v): v is string => typeof v === 'string',
+    )
+    const label =
+      typeof variant.title === 'string' && variant.title.length > 0
+        ? variant.title
+        : optionValues.join(' / ') || variantId
+    const sku = typeof variant.sku === 'string' && variant.sku.length > 0 ? variant.sku : undefined
+
+    variants.push({
+      variant_id: variantId,
+      label,
+      option_values: optionValues,
+      price_paise: price,
+      available: variant.available === true,
+      ...(sku ? { sku } : {}),
+    })
+  }
+  return variants.length > 1 ? variants : undefined
+}
+
 /** Maps Shopify's `/products.json` storefront feed onto the scanner's product
  * shape. Every Shopify store exposes this feed regardless of theme, unlike
  * schema.org JSON-LD, which many themes omit entirely — this is the fallback
@@ -442,6 +528,9 @@ export function extractShopifyProducts(
         ? truncate(stripHtml(node.body_html), SHOPIFY_DESCRIPTION_MAX_CHARS)
         : ''
 
+    const scannedVariants = buildScannedVariants(variants)
+    const scannedOptions = scannedVariants ? buildScannedOptions(node.options) : undefined
+
     products.push({
       sku,
       name: title,
@@ -452,6 +541,8 @@ export function extractShopifyProducts(
       image,
       brand: typeof node.vendor === 'string' && node.vendor.length > 0 ? node.vendor : merchantId,
       url: handle ? new URL(`/products/${handle}`, base).toString() : baseUrl,
+      ...(scannedVariants ? { variants: scannedVariants } : {}),
+      ...(scannedOptions ? { options: scannedOptions } : {}),
     })
   }
 

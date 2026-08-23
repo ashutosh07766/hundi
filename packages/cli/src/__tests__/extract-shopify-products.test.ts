@@ -157,3 +157,146 @@ describe('extractShopifyProducts', () => {
     expect(warnings).toHaveLength(0)
   })
 })
+
+describe('extractShopifyProducts — variants', () => {
+  it('captures every variant with its option_values for a multi-variant product', () => {
+    const json = shopifyFeed([
+      {
+        handle: 'active-walking-shoes',
+        title: 'Active Walking Shoes',
+        vendor: 'Frido',
+        images: [{ src: 'https://cdn.shopify.com/s/files/1/shoes.jpg' }],
+        options: [{ name: 'Size', values: ['9', '10', '11'] }],
+        variants: [
+          { id: 1001, title: '9', option1: '9', price: '3200.00', available: true, sku: 'SKU-9' },
+          {
+            id: 1002,
+            title: '10',
+            option1: '10',
+            price: '3200.00',
+            available: true,
+            sku: 'SKU-10',
+          },
+          {
+            id: 1003,
+            title: '11',
+            option1: '11',
+            price: '3400.00',
+            available: false,
+            sku: 'SKU-11',
+          },
+        ],
+      },
+    ])
+
+    const { products } = extractShopifyProducts(json, BASE_URL, 'myfrido-com')
+    expect(products).toHaveLength(1)
+    const product = products[0]!
+
+    // Product-level price/availability still reflect the first variant (legacy
+    // flat-catalog fields), unchanged by variant capture.
+    expect(product.price_paise).toBe(320000)
+    expect(product.availability).toBe('in_stock')
+
+    expect(product.options).toEqual([{ name: 'Size', values: ['9', '10', '11'] }])
+    expect(product.variants).toHaveLength(3)
+    expect(product.variants).toEqual([
+      {
+        variant_id: '1001',
+        label: '9',
+        option_values: ['9'],
+        price_paise: 320000,
+        available: true,
+        sku: 'SKU-9',
+      },
+      {
+        variant_id: '1002',
+        label: '10',
+        option_values: ['10'],
+        price_paise: 320000,
+        available: true,
+        sku: 'SKU-10',
+      },
+      {
+        variant_id: '1003',
+        label: '11',
+        option_values: ['11'],
+        price_paise: 340000,
+        available: false,
+        sku: 'SKU-11',
+      },
+    ])
+  })
+
+  it('maps option1/option2/option3 into option_values in order for multi-option variants', () => {
+    const json = shopifyFeed([
+      {
+        handle: 'trail-runner',
+        title: 'Trail Runner',
+        vendor: 'Frido',
+        options: [
+          { name: 'Size', values: ['9', '10'] },
+          { name: 'Color', values: ['Black', 'Red'] },
+        ],
+        variants: [
+          {
+            id: 1,
+            title: '9 / Black',
+            option1: '9',
+            option2: 'Black',
+            price: '3000.00',
+            available: true,
+          },
+          {
+            id: 2,
+            title: '10 / Red',
+            option1: '10',
+            option2: 'Red',
+            price: '3000.00',
+            available: true,
+          },
+        ],
+      },
+    ])
+
+    const { products } = extractShopifyProducts(json, BASE_URL, 'myfrido-com')
+    expect(products[0]?.variants?.[0]?.option_values).toEqual(['9', 'Black'])
+    expect(products[0]?.variants?.[0]?.label).toBe('9 / Black')
+    expect(products[0]?.variants?.[1]?.option_values).toEqual(['10', 'Red'])
+  })
+
+  it('leaves variants and options undefined for a single "Default Title" variant (unchanged behavior)', () => {
+    const json = shopifyFeed([
+      {
+        handle: 'compression-socks',
+        title: 'Compression Socks',
+        vendor: 'Frido',
+        options: [{ name: 'Title', values: ['Default Title'] }],
+        variants: [
+          {
+            id: 5001,
+            title: 'Default Title',
+            option1: 'Default Title',
+            price: '549.00',
+            available: true,
+            sku: 'SKU-SOCKS-1',
+          },
+        ],
+      },
+    ])
+
+    const { products } = extractShopifyProducts(json, BASE_URL, 'myfrido-com')
+    expect(products).toHaveLength(1)
+    const product = products[0]!
+    expect(product.variants).toBeUndefined()
+    expect(product.options).toBeUndefined()
+    // The rest of the flat-product shape is exactly what it was before variant
+    // capture existed.
+    expect(product).toMatchObject({
+      sku: 'compression-socks',
+      name: 'Compression Socks',
+      price_paise: 54900,
+      availability: 'in_stock',
+    })
+  })
+})

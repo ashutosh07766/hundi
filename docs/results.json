@@ -1,0 +1,179 @@
+{
+  "generatedAt": "2026-08-23T11:52:25.527Z",
+  "taskCount": 20,
+  "matched": 20,
+  "matchRatePct": 100,
+  "bucketCounts": {
+    "settled": 8,
+    "rejected": 3,
+    "HITL-approved": 3,
+    "HITL-rejected": 2,
+    "recovered": 1,
+    "settled-on-retry": 1,
+    "blocked": 2
+  },
+  "wallClockMs": 2764,
+  "ledgerHeadHash": "d255a0dba3b9f9d099b98eca4f7c12c1b4c877f7589cea777074d87f6931ef97",
+  "rows": [
+    {
+      "id": "happy-1",
+      "kind": "happy",
+      "expectedTerminal": "captured",
+      "actualTerminal": "captured",
+      "bucket": "settled",
+      "pass": true
+    },
+    {
+      "id": "happy-2",
+      "kind": "happy",
+      "expectedTerminal": "captured",
+      "actualTerminal": "captured",
+      "bucket": "settled",
+      "pass": true
+    },
+    {
+      "id": "happy-3",
+      "kind": "happy",
+      "expectedTerminal": "captured",
+      "actualTerminal": "captured",
+      "bucket": "settled",
+      "pass": true
+    },
+    {
+      "id": "happy-4",
+      "kind": "happy",
+      "expectedTerminal": "captured",
+      "actualTerminal": "captured",
+      "bucket": "settled",
+      "pass": true
+    },
+    {
+      "id": "happy-5",
+      "kind": "happy",
+      "expectedTerminal": "captured",
+      "actualTerminal": "captured",
+      "bucket": "settled",
+      "pass": true
+    },
+    {
+      "id": "happy-6",
+      "kind": "happy",
+      "expectedTerminal": "captured",
+      "actualTerminal": "captured",
+      "bucket": "settled",
+      "pass": true
+    },
+    {
+      "id": "happy-7",
+      "kind": "happy",
+      "expectedTerminal": "captured",
+      "actualTerminal": "captured",
+      "bucket": "settled",
+      "pass": true
+    },
+    {
+      "id": "happy-8",
+      "kind": "happy",
+      "expectedTerminal": "captured",
+      "actualTerminal": "captured",
+      "bucket": "settled",
+      "pass": true
+    },
+    {
+      "id": "over-cap-1",
+      "kind": "over-cap",
+      "expectedTerminal": "blocked-verify (AMOUNT_EXCEEDS_CEILING)",
+      "actualTerminal": "blocked-verify (AMOUNT_EXCEEDS_CEILING)",
+      "bucket": "rejected",
+      "pass": true
+    },
+    {
+      "id": "over-cap-2",
+      "kind": "over-cap",
+      "expectedTerminal": "blocked-verify (AMOUNT_EXCEEDS_CEILING)",
+      "actualTerminal": "blocked-verify (AMOUNT_EXCEEDS_CEILING)",
+      "bucket": "rejected",
+      "pass": true
+    },
+    {
+      "id": "over-cap-3",
+      "kind": "over-cap",
+      "expectedTerminal": "blocked-verify (AMOUNT_EXCEEDS_CEILING)",
+      "actualTerminal": "blocked-verify (AMOUNT_EXCEEDS_CEILING)",
+      "bucket": "rejected",
+      "pass": true
+    },
+    {
+      "id": "auto-approve-1",
+      "kind": "auto-approve",
+      "expectedTerminal": "captured",
+      "actualTerminal": "captured",
+      "bucket": "HITL-approved",
+      "pass": true
+    },
+    {
+      "id": "auto-approve-2",
+      "kind": "auto-approve",
+      "expectedTerminal": "captured",
+      "actualTerminal": "captured",
+      "bucket": "HITL-approved",
+      "pass": true
+    },
+    {
+      "id": "auto-approve-3",
+      "kind": "auto-approve",
+      "expectedTerminal": "captured",
+      "actualTerminal": "captured",
+      "bucket": "HITL-approved",
+      "pass": true
+    },
+    {
+      "id": "auto-reject-1",
+      "kind": "auto-reject",
+      "expectedTerminal": "rejected",
+      "actualTerminal": "rejected (approval_rejected)",
+      "bucket": "HITL-rejected",
+      "pass": true
+    },
+    {
+      "id": "auto-reject-2",
+      "kind": "auto-reject",
+      "expectedTerminal": "rejected",
+      "actualTerminal": "rejected (approval_rejected)",
+      "bucket": "HITL-rejected",
+      "pass": true
+    },
+    {
+      "id": "fail-all-1",
+      "kind": "fail-all",
+      "expectedTerminal": "settling",
+      "actualTerminal": "settling",
+      "bucket": "recovered",
+      "pass": true
+    },
+    {
+      "id": "fail-then-capture-1",
+      "kind": "fail-then-capture",
+      "expectedTerminal": "captured",
+      "actualTerminal": "captured",
+      "bucket": "settled-on-retry",
+      "pass": true
+    },
+    {
+      "id": "injection-1",
+      "kind": "injection",
+      "expectedTerminal": "blocked-verify (MERCHANT_NOT_IN_SCOPE)",
+      "actualTerminal": "blocked-verify (MERCHANT_NOT_IN_SCOPE)",
+      "bucket": "blocked",
+      "pass": true
+    },
+    {
+      "id": "injection-2",
+      "kind": "injection",
+      "expectedTerminal": "blocked-verify (MERCHANT_NOT_IN_SCOPE)",
+      "actualTerminal": "blocked-verify (MERCHANT_NOT_IN_SCOPE)",
+      "bucket": "blocked",
+      "pass": true
+    }
+  ]
+}

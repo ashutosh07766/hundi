@@ -1,0 +1,20 @@
+{
+  "name": "@hundi/harness",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "harness": "tsx src/run.ts"
+  },
+  "dependencies": {
+    "@hundi/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^2.1.1",
+    "typescript": "^5.9.0",
+    "tsx": "^4.20.0",
+    "vitest": "^4.0.0"
+  }
+}

@@ -5,6 +5,7 @@ import { mintCeremonyToken, registerMandate } from '../lib/api.js'
 import { rupeesToPaise } from '../lib/format.js'
 import type { SignedCeremony } from '../lib/intent.js'
 import { buildSignedIntent } from '../lib/intent.js'
+import { generateKeypair } from '../lib/signing.js'
 
 function defaultExpiryLocal(hoursFromNow: number): string {
   const d = new Date(Date.now() + hoursFromNow * 60 * 60 * 1000)
@@ -20,15 +21,23 @@ export function MandateCeremony() {
   const [thresholdRupees, setThresholdRupees] = useState('500')
   const [merchantsCsv, setMerchantsCsv] = useState('')
   const [expiryLocal, setExpiryLocal] = useState(() => defaultExpiryLocal(1))
+  const [agentPubkeyHex, setAgentPubkeyHex] = useState('')
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<{ ceremony: SignedCeremony; mandateId: string } | null>(null)
+  /** Set only when the operator left the agent-key field blank and we minted an
+   * ephemeral one — surfaced so it can be handed to a brain. Not persisted. */
+  const [ephemeralAgentKey, setEphemeralAgentKey] = useState<{
+    secretKeyHex: string
+    publicKeyHex: string
+  } | null>(null)
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
     setResult(null)
+    setEphemeralAgentKey(null)
 
     if (!dashboardToken) {
       setError('Set the dashboard token above before running the ceremony.')
@@ -48,6 +57,21 @@ export function MandateCeremony() {
       return
     }
 
+    // The intent attests a DISTINCT agent key as the cart signer — never the
+    // human key (that collapse is the vulnerability this ceremony exists to
+    // avoid). If the operator didn't paste the agent's pubkey, mint an ephemeral
+    // agent keypair here and surface it below so it can be handed to a brain.
+    let agentPubkey = agentPubkeyHex.trim()
+    let mintedEphemeral: { secretKeyHex: string; publicKeyHex: string } | null = null
+    if (!agentPubkey) {
+      mintedEphemeral = generateKeypair()
+      agentPubkey = mintedEphemeral.publicKeyHex
+    }
+    if (agentPubkey === human.publicKeyHex) {
+      setError('The agent key must differ from the human key — they are separate parties.')
+      return
+    }
+
     setBusy(true)
     try {
       const ceremony = buildSignedIntent(
@@ -57,6 +81,7 @@ export function MandateCeremony() {
           approvalThresholdPaise: rupeesToPaise(Number(thresholdRupees)),
           merchants,
           expiresAt,
+          agentPubkeyHex: agentPubkey,
         },
         human,
       )
@@ -67,6 +92,7 @@ export function MandateCeremony() {
         ceremonyToken,
       )
       setResult({ ceremony, mandateId })
+      if (mintedEphemeral) setEphemeralAgentKey(mintedEphemeral)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -130,6 +156,19 @@ export function MandateCeremony() {
         </label>
 
         <label className="field">
+          <span>Agent public key (hex)</span>
+          <input
+            value={agentPubkeyHex}
+            onChange={(e) => setAgentPubkeyHex(e.target.value)}
+            placeholder="Paste the agent's ed25519 pubkey — leave blank to mint an ephemeral one"
+          />
+          <small className="field__hint">
+            The buyer agent's key, generated out-of-band. It signs carts; it can never approve or
+            revoke. Leave blank and the dashboard mints a throwaway agent key to hand off.
+          </small>
+        </label>
+
+        <label className="field">
           <span>Expires</span>
           <input
             required
@@ -145,6 +184,22 @@ export function MandateCeremony() {
       </form>
 
       {error && <div className="banner banner--error">{error}</div>}
+
+      {ephemeralAgentKey && (
+        <div className="banner banner--warning">
+          <p>
+            <strong>Give this to the agent.</strong> No agent key was provided, so an ephemeral one
+            was minted. The agent needs its private key to sign carts; the dashboard does not keep a
+            copy.
+          </p>
+          <p>
+            Agent public key: <code>{ephemeralAgentKey.publicKeyHex}</code>
+          </p>
+          <p>
+            Agent private key: <code>{ephemeralAgentKey.secretKeyHex}</code>
+          </p>
+        </div>
+      )}
 
       {result && (
         <div className="banner banner--success">

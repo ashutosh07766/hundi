@@ -194,6 +194,12 @@ code,
   font-weight: 500;
 }
 
+.field__hint {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .field-row {
   display: flex;
   gap: 14px;
@@ -269,6 +275,16 @@ input:focus {
   background: rgba(52, 211, 153, 0.08);
   border: 1px solid var(--accent-dim);
   color: var(--text);
+}
+
+.banner--warning {
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid var(--warn);
+  color: var(--text);
+}
+
+.banner--warning code {
+  word-break: break-all;
 }
 
 .json-block {

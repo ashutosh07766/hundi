@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { buildSignedIntent, signApprovalDecision, signRevoke } from '../lib/intent.js'
 import { generateKeypair } from '../lib/signing.js'
 
+const AGENT_PUBKEY = 'aa'.repeat(32)
+
 describe('buildSignedIntent', () => {
   it('produces a mandate with integer paise fields', () => {
     const human = generateKeypair()
@@ -13,6 +15,7 @@ describe('buildSignedIntent', () => {
         approvalThresholdPaise: 50000,
         merchants: ['merchant-1'],
         expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        agentPubkeyHex: AGENT_PUBKEY,
       },
       human,
     )
@@ -21,7 +24,7 @@ describe('buildSignedIntent', () => {
     expect(intent.currency).toBe('INR')
   })
 
-  it('binds the intent to the human key as both agent and credential', () => {
+  it('attests the distinct agent key while registering the human key as the credential', () => {
     const human = generateKeypair()
     const { intent, credential } = buildSignedIntent(
       {
@@ -30,10 +33,14 @@ describe('buildSignedIntent', () => {
         approvalThresholdPaise: 50000,
         merchants: ['merchant-1'],
         expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        agentPubkeyHex: AGENT_PUBKEY,
       },
       human,
     )
-    expect(intent.agent_pubkey_hex).toBe(human.publicKeyHex)
+    // The two-key model: the intent names the agent key as the cart signer, but
+    // the registered credential is the human key — they are different parties.
+    expect(intent.agent_pubkey_hex).toBe(AGENT_PUBKEY)
+    expect(intent.agent_pubkey_hex).not.toBe(human.publicKeyHex)
     expect(credential).toEqual({ type: 'ed25519', publicKey_hex: human.publicKeyHex })
   })
 
@@ -46,6 +53,7 @@ describe('buildSignedIntent', () => {
         approvalThresholdPaise: 50000,
         merchants: ['merchant-1', 'merchant-2'],
         expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        agentPubkeyHex: AGENT_PUBKEY,
       },
       human,
     )
@@ -61,6 +69,7 @@ describe('buildSignedIntent', () => {
       approvalThresholdPaise: 50000,
       merchants: ['merchant-1'],
       expiresAt: 1_700_000_000,
+      agentPubkeyHex: AGENT_PUBKEY,
     }
     const first = buildSignedIntent(input, human)
     // mandateId is freshly generated each call, so compare signing bytes with mandateId pinned.
@@ -80,6 +89,7 @@ describe('buildSignedIntent', () => {
       approvalThresholdPaise: 50000,
       merchants: ['merchant-1'],
       expiresAt: 1_700_000_000,
+      agentPubkeyHex: AGENT_PUBKEY,
     }
     const a = buildSignedIntent(input, human)
     const b = buildSignedIntent(input, human)

@@ -1,11 +1,16 @@
 /**
  * Builds and signs the mandate-chain payloads the human console originates:
  * the intent mandate itself (the ceremony), an approval/rejection decision,
- * and a revocation. All three are signed with the same human keypair — the
- * dashboard-issued ceremony path makes the human both the intent's declared
- * agent and the mandate's registered credential (see mandates.ts /
- * approvals.ts / revoke.ts in the facilitator), so one key signs the whole
- * lifecycle for a mandate this console minted.
+ * and a revocation. All three are signed with the human keypair — the human is
+ * the mandate's registered credential (see mandates.ts / approvals.ts /
+ * revoke.ts in the facilitator).
+ *
+ * The intent also declares an `agent_pubkey_hex`: a DISTINCT key, held by the
+ * buyer agent, which signs carts (and only carts). The human never holds it and
+ * the agent never holds the human key — so the agent can propose spending but
+ * cannot approve or revoke it. That two-party split is the whole trust boundary;
+ * the human signs the intent (attesting the agent key), the agent signs carts,
+ * and above-threshold spending routes back to the human key for a decision.
  */
 
 import type { Credential, IntentMandate, SigEnvelope } from '@hundi/core'
@@ -19,6 +24,10 @@ export type CeremonyInput = {
   approvalThresholdPaise: number
   merchants: string[]
   expiresAt: number
+  /** The buyer agent's ed25519 public key (hex). Generated out-of-band by the
+   * agent and pasted into the ceremony; this is the key the intent attests as
+   * the cart signer. Must NOT equal the human key. */
+  agentPubkeyHex: string
 }
 
 export type SignedCeremony = {
@@ -27,8 +36,9 @@ export type SignedCeremony = {
 }
 
 /** Builds a fresh IntentMandate from ceremony form input and signs it with the
- * human key. Returns both the signed intent and the credential the facilitator
- * should bind it to (POST /mandates body shape). */
+ * human key. The intent embeds `input.agentPubkeyHex` as the attested cart
+ * signer; the registered credential is the human key. Returns both the signed
+ * intent and that credential (POST /mandates body shape). */
 export function buildSignedIntent(input: CeremonyInput, human: HumanKeypair): SignedCeremony {
   const unsigned = {
     mandateId: crypto.randomUUID(),
@@ -38,7 +48,7 @@ export function buildSignedIntent(input: CeremonyInput, human: HumanKeypair): Si
     currency: 'INR' as const,
     merchants: input.merchants,
     expires_at: input.expiresAt,
-    agent_pubkey_hex: human.publicKeyHex,
+    agent_pubkey_hex: input.agentPubkeyHex,
   }
   const sig = signBytes(human.secretKeyHex, intentSigningBytes(unsigned))
   return {

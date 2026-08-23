@@ -110,6 +110,21 @@ describe('buildUnsignedCart + signCart', () => {
     expect(unsigned.intent_hash_hex).toBe(sha256Hex(intentSigningBytes(INTENT)))
   })
 
+  it('includes variant_id/variant_label on the line item when the pick carries a resolved variant', () => {
+    const pick = {
+      ok: true as const,
+      product: CATALOG[0]!,
+      merchantId: 'demo-store-1',
+      unitPricePaise: 300_000,
+      variantId: 'v-9',
+      variantLabel: '9',
+    }
+    const unsigned = buildUnsignedCart(pick, INTENT)
+    expect(unsigned.items).toEqual([
+      { sku: 'sku-001', qty: 1, unit_price_paise: 300_000, variant_id: 'v-9', variant_label: '9' },
+    ])
+  })
+
   it('signs with the agent key so core.verifyMandateSignature accepts it against agent_pubkey_hex', () => {
     const agentKeyPair = generateKeypair()
     const intent: IntentMandate = { ...INTENT, agent_pubkey_hex: agentKeyPair.publicKeyHex }
@@ -372,5 +387,138 @@ describe('runTestPurchase', () => {
 
     expect(result).toEqual({ ok: false, state: 'blocked', reason: 'NO_MERCHANT_IN_SCOPE' })
     expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  describe('variant resolution from /agent/select', () => {
+    const CATALOG_WITH_VARIANTS: StoreProduct[] = [
+      {
+        id: 'shoes-1',
+        title: 'Active Walking Shoes',
+        price_paise: 320_000,
+        availability: { status: 'in_stock' },
+        merchant_id: 'demo-store-1',
+        variants: [
+          {
+            variant_id: 'v-9',
+            label: '9',
+            option_values: ['9'],
+            price_paise: 300_000,
+            available: true,
+          },
+          {
+            variant_id: 'v-11',
+            label: '11',
+            option_values: ['11'],
+            price_paise: 320_000,
+            available: true,
+          },
+        ],
+      },
+    ]
+
+    it('prices the cart from the resolved variant and carries variant_id/variant_label into the signed items', async () => {
+      const calls: Array<{ url: string; init: RequestInit | undefined }> = []
+      const mockFetch = vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, init })
+        if (url.endsWith('/agent/select')) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              chosen_sku: 'shoes-1',
+              title: 'Active Walking Shoes',
+              price_paise: 320_000,
+              merchant_id: 'demo-store-1',
+              reason: 'size 9 requested',
+              via: 'llm',
+              chosen_variant_id: 'v-9',
+              variant_label: '9',
+            }),
+            { status: 200 },
+          )
+        }
+        if (url.endsWith('/catalog/demo-store-1')) {
+          return new Response(JSON.stringify(CATALOG_WITH_VARIANTS), { status: 200 })
+        }
+        if (url.endsWith('/settlements')) {
+          return new Response(
+            JSON.stringify({ ok: true, settlement_id: 'settle-variant-1', state: 'captured' }),
+            { status: 202 },
+          )
+        }
+        throw new Error(`unexpected fetch to ${url}`)
+      })
+      globalThis.fetch = mockFetch as unknown as typeof fetch
+
+      const result = await runTestPurchase({
+        mandateId: 'mandate-1',
+        intent: { ...INTENT, agent_pubkey_hex: agentKeyPair.publicKeyHex },
+        agentKeyPair,
+        facilitatorUrl: 'http://127.0.0.1:8790',
+        dashboardToken: DASHBOARD_TOKEN,
+        poisoned: false,
+      })
+
+      expect(result.ok).toBe(true)
+      expect(result.state).toBe('captured')
+
+      const postCall = calls.find((c) => c.url === 'http://127.0.0.1:8790/settlements')
+      expect(postCall).toBeDefined()
+      const body = JSON.parse(postCall?.init?.body as string) as { cart: unknown }
+      // Priced from the variant (300_000), not the recommendation's product-level
+      // price_paise (320_000) — never trust the /agent/select payload for price.
+      expect(body.cart).toMatchObject({
+        items: [
+          {
+            sku: 'shoes-1',
+            qty: 1,
+            unit_price_paise: 300_000,
+            variant_id: 'v-9',
+            variant_label: '9',
+          },
+        ],
+        total_paise: 300_000,
+      })
+    })
+
+    it('blocks (no settlement call) when the recommended variant does not exist on the live catalog listing', async () => {
+      const mockFetch = vi.fn(async (url: string) => {
+        if (url.endsWith('/agent/select')) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              chosen_sku: 'shoes-1',
+              title: 'Active Walking Shoes',
+              price_paise: 320_000,
+              merchant_id: 'demo-store-1',
+              reason: 'size 13 requested',
+              via: 'llm',
+              chosen_variant_id: 'v-13',
+              variant_label: '13',
+            }),
+            { status: 200 },
+          )
+        }
+        if (url.endsWith('/catalog/demo-store-1')) {
+          return new Response(JSON.stringify(CATALOG_WITH_VARIANTS), { status: 200 })
+        }
+        throw new Error(`unexpected fetch to ${url}`)
+      })
+      globalThis.fetch = mockFetch as unknown as typeof fetch
+
+      const result = await runTestPurchase({
+        mandateId: 'mandate-1',
+        intent: { ...INTENT, agent_pubkey_hex: agentKeyPair.publicKeyHex },
+        agentKeyPair,
+        facilitatorUrl: 'http://127.0.0.1:8790',
+        dashboardToken: DASHBOARD_TOKEN,
+        poisoned: false,
+      })
+
+      expect(result).toEqual({ ok: false, state: 'blocked', reason: 'VARIANT_NOT_FOUND' })
+      expect(mockFetch).not.toHaveBeenCalledWith(
+        expect.stringContaining('/settlements'),
+        expect.anything(),
+      )
+    })
   })
 })

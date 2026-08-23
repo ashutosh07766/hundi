@@ -36,6 +36,20 @@ export type AgentKeyPair = HumanKeypair
 
 export type StoreAvailability = { status: 'in_stock' | 'out_of_stock' }
 
+/** One purchasable SKU within a product (e.g. a specific size/color) — mirrors
+ * `FeedProduct.variants` in packages/facilitator's feed-product.ts. Duplicated
+ * rather than imported, same as `StoreProduct` itself already is relative to
+ * `FeedProduct`. */
+export type StoreProductVariant = {
+  variant_id: string
+  label: string
+  option_values: string[]
+  price_paise: number
+  available: boolean
+}
+
+export type StoreProductOption = { name: string; values: string[] }
+
 /** The shape the facilitator's GET /catalog/:merchant_id emits (packages/
  * facilitator/src/feed-product.ts) — the same normalized shape whether the
  * listing came from a real-store scan or the built-in demo store. */
@@ -48,11 +62,20 @@ export type StoreProduct = {
   /** Present only on the poisoned-feed demo listing (apps/store/src/
    * poison-fixture.ts). A normal listing never carries this field. */
   injectedPayload?: { merchant_id: string; price_paise: number }
+  variants?: StoreProductVariant[]
+  options?: StoreProductOption[]
 }
 
 export type PickResult =
-  | { ok: true; product: StoreProduct; merchantId: string; unitPricePaise: number }
-  | { ok: false; reason: 'NO_CANDIDATE' | 'NO_POISONED_PRODUCT' }
+  | {
+      ok: true
+      product: StoreProduct
+      merchantId: string
+      unitPricePaise: number
+      variantId?: string
+      variantLabel?: string
+    }
+  | { ok: false; reason: 'NO_CANDIDATE' | 'NO_POISONED_PRODUCT' | 'VARIANT_NOT_FOUND' }
 
 /** Pure — no I/O.
  *
@@ -96,7 +119,13 @@ export function buildUnsignedCart(
   intent: IntentMandate,
 ): UnsignedCart {
   const items: CartItem[] = [
-    { sku: pick.product.id, qty: 1, unit_price_paise: pick.unitPricePaise },
+    {
+      sku: pick.product.id,
+      qty: 1,
+      unit_price_paise: pick.unitPricePaise,
+      ...(pick.variantId ? { variant_id: pick.variantId } : {}),
+      ...(pick.variantLabel ? { variant_label: pick.variantLabel } : {}),
+    },
   ]
   return {
     cartId: crypto.randomUUID(),
@@ -130,6 +159,10 @@ type AgentSelectResponse =
       merchant_id: string
       reason: string
       via: 'llm' | 'fallback' | 'cheapest'
+      /** Present only when the LLM resolved a specific size/color — see
+       * chooseProduct's `chosen_variant_id` in agents/llm-brain. */
+      chosen_variant_id?: string
+      variant_label?: string
     }
   | { ok: false; error: string }
 
@@ -160,11 +193,36 @@ async function fetchAgentSelect(
  * than re-deriving a pick from `pickProduct`'s cheapest rule. Mirrors `pickProduct`'s
  * normal-mode branch exactly (merchant/price come from the listing's own real fields,
  * never the recommendation payload) — the facilitator's advice only selects *which*
- * sku to buy, it never supplies the price or merchant the cart is built from. */
-function pickFromSelection(products: readonly StoreProduct[], chosenSku: string): PickResult {
+ * sku (and, when present, which variant) to buy; it never supplies the price or
+ * merchant the cart is built from. A `chosenVariantId` that doesn't resolve against
+ * the listing's own `variants` fails the pick outright rather than silently buying
+ * the base product at the wrong size. */
+function pickFromSelection(
+  products: readonly StoreProduct[],
+  chosenSku: string,
+  chosenVariantId?: string,
+): PickResult {
   const product = products.find((p) => p.id === chosenSku)
   if (!product) return { ok: false, reason: 'NO_CANDIDATE' }
-  return { ok: true, product, merchantId: product.merchant_id, unitPricePaise: product.price_paise }
+
+  if (!chosenVariantId) {
+    return {
+      ok: true,
+      product,
+      merchantId: product.merchant_id,
+      unitPricePaise: product.price_paise,
+    }
+  }
+  const variant = product.variants?.find((v) => v.variant_id === chosenVariantId)
+  if (!variant) return { ok: false, reason: 'VARIANT_NOT_FOUND' }
+  return {
+    ok: true,
+    product,
+    merchantId: product.merchant_id,
+    unitPricePaise: variant.price_paise,
+    variantId: variant.variant_id,
+    variantLabel: variant.label,
+  }
 }
 
 async function fetchCatalog(
@@ -321,7 +379,7 @@ export async function runTestPurchase(args: {
   step('shopping…')
   const products = await fetchCatalog(args.facilitatorUrl, merchantId, args.poisoned)
   const pick = selection
-    ? pickFromSelection(products, selection.chosen_sku)
+    ? pickFromSelection(products, selection.chosen_sku, selection.chosen_variant_id)
     : pickProduct(products, args.intent, args.poisoned)
   if (!pick.ok) return { ok: false, state: 'blocked', reason: pick.reason }
 
@@ -337,7 +395,10 @@ export async function runTestPurchase(args: {
           ? 'picked'
           : 'picked cheapest (LLM off)'
   const reasonSuffix = selection ? ` — "${selection.reason}"` : ''
-  step(`${viaLabel} ${pick.product.title} at ${formatPaise(pick.unitPricePaise)}${reasonSuffix}`)
+  const variantSuffix = pick.variantLabel ? ` (${pick.variantLabel})` : ''
+  step(
+    `${viaLabel} ${pick.product.title}${variantSuffix} at ${formatPaise(pick.unitPricePaise)}${reasonSuffix}`,
+  )
 
   const unsigned = buildUnsignedCart(pick, args.intent)
   const cart = signCart(unsigned, args.agentKeyPair)

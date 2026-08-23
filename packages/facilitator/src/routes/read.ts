@@ -114,9 +114,10 @@ export function registerReadRoutes(app: Hono, { db }: AppDeps): void {
             : remainingPaise <= 0
               ? 'consumed'
               : 'active'
+      // ceiling is available on `intent_json` (already in `...row`); the wallet
+      // accounting this endpoint adds is the derived part — spent, remaining, state.
       return {
         ...row,
-        ceiling_paise: intent.ceiling_paise,
         spent_paise: spentPaise,
         remaining_paise: remainingPaise,
         state,

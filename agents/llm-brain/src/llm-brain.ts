@@ -103,7 +103,11 @@ export async function runLlmPurchase(
   const log = deps.log ?? defaultLog
   const chat = deps.chat ?? buildDefaultChatClient(config)
 
-  const candidates = await tools.searchCatalog(goal.query)
+  // Hand the LLM the full catalog and let IT judge relevance to the goal — the
+  // whole point of an LLM brain. A substring pre-filter on the goal text (the
+  // scripted brain's approach) would hide the very products the model should
+  // reason over (e.g. goal "leather sneakers for men" matches no title verbatim).
+  const candidates = await tools.searchCatalog()
   log('search', { query: goal.query, resultCount: candidates.length })
 
   const pick = await askLlm(chat, goal, candidates)
@@ -203,11 +207,23 @@ async function askLlm(
   return pick.chosen_sku ? { chosen_sku: pick.chosen_sku, reason: pick.reason ?? '' } : undefined
 }
 
+/** Cap candidates sent to the LLM so a large real-store catalog (e.g. 200+
+ * Shopify products) stays under free-tier request-token limits. In-stock,
+ * within-budget items are prioritized so the cap never hides a valid pick. */
+const MAX_LLM_CANDIDATES = 90
+
 function buildPrompt(goal: LlmGoal, candidates: Product[]): { system: string; user: string } {
-  const listing = candidates.map((p) => ({
+  const ranked = [...candidates].sort((a, b) => {
+    const aOk = a.availability.status === 'in_stock' && a.price_paise <= goal.ceiling_paise
+    const bOk = b.availability.status === 'in_stock' && b.price_paise <= goal.ceiling_paise
+    if (aOk !== bOk) return aOk ? -1 : 1
+    return 0
+  })
+  // Title + price + brand only — descriptions balloon the prompt ~2x and blow
+  // the free-tier token limit; title/brand carry enough signal to pick by goal.
+  const listing = ranked.slice(0, MAX_LLM_CANDIDATES).map((p) => ({
     id: p.id,
     title: p.title,
-    description: p.description,
     price_paise: p.price_paise,
     availability: p.availability.status,
     brand: p.brand,

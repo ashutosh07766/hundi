@@ -34,8 +34,8 @@ export async function chatJson(args: ChatJsonArgs): Promise<LlmPick> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS)
 
-  try {
-    const res = await fetchImpl(`${base}/chat/completions`, {
+  const post = (useJsonMode: boolean) =>
+    fetchImpl(`${base}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -47,10 +47,20 @@ export async function chatJson(args: ChatJsonArgs): Promise<LlmPick> {
           { role: 'system', content: args.system },
           { role: 'user', content: args.user },
         ],
-        response_format: { type: 'json_object' },
+        // Reasoning models (e.g. gpt-oss) spend output tokens "thinking" before
+        // emitting the JSON answer — too small a budget yields empty content.
+        max_tokens: 2048,
+        // json_object mode helps providers that honor it, but some (e.g. Groq's
+        // gpt-oss models) reject it with a 400. parsePick's regex handles raw
+        // or fenced JSON anyway, so on rejection we retry without the flag.
+        ...(useJsonMode ? { response_format: { type: 'json_object' } } : {}),
       }),
       signal: controller.signal,
     })
+
+  try {
+    let res = await post(true)
+    if (!res.ok) res = await post(false)
     if (!res.ok) return {}
 
     const body = (await res.json()) as {

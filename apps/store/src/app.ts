@@ -10,9 +10,21 @@ type FeedProduct = Omit<Product, 'availability'> & {
   merchant_id: string
 }
 
-function toFeedProduct(product: Product): FeedProduct {
+/** schema.org and agent feeds want absolute image URLs; the catalog stores them
+ * as self-served relative paths (`/img/sku-001`) so the store has no external
+ * image dependency. Resolve to absolute against the request origin at emit time. */
+function absoluteImage(image: string, origin: string): string {
+  return image.startsWith('http') ? image : `${origin}${image}`
+}
+
+function toFeedProduct(product: Product, origin: string): FeedProduct {
   const { availability, ...rest } = product
-  return { ...rest, availability: { status: availability }, merchant_id: MERCHANT_ID }
+  return {
+    ...rest,
+    image: absoluteImage(product.image, origin),
+    availability: { status: availability },
+    merchant_id: MERCHANT_ID,
+  }
 }
 
 /** schema.org Offer.price wants a decimal-rupee string ("3200.00"), not the
@@ -137,7 +149,7 @@ ${items}
       '@context': 'https://schema.org/',
       '@type': 'Product',
       name: product.title,
-      image: product.image,
+      image: absoluteImage(product.image, new URL(c.req.url).origin),
       description: product.description,
       brand: { '@type': 'Brand', name: product.brand },
       offers: {
@@ -194,9 +206,10 @@ Agents should fetch the capability manifest at ${base}/.well-known/hundi.json to
   })
 
   app.get('/api/catalog', (c) => {
+    const origin = new URL(c.req.url).origin
     const poisoned = c.req.query('poisoned') === '1'
     const products = poisoned ? [...catalog, POISON_PRODUCT] : catalog
-    return c.json(products.map(toFeedProduct))
+    return c.json(products.map((p) => toFeedProduct(p, origin)))
   })
 
   app.get('/api/products/:id', (c) => {
@@ -204,7 +217,7 @@ Agents should fetch the capability manifest at ${base}/.well-known/hundi.json to
     if (!product) {
       return c.json({ ok: false, error: 'NOT_FOUND' }, 404)
     }
-    return c.json(toFeedProduct(product))
+    return c.json(toFeedProduct(product, new URL(c.req.url).origin))
   })
 
   return app

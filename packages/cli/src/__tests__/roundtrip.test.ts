@@ -37,7 +37,10 @@ describe('round-trip against @hundi/store', () => {
       expect(recovered?.price_paise).toBe(product.price_paise)
       expect(recovered?.currency).toBe(product.currency)
       expect(recovered?.availability).toBe(product.availability)
-      expect(recovered?.image).toBe(product.image)
+      // The store emits an absolute image URL in JSON-LD (schema.org requires it);
+      // the catalog stores a self-served relative path. The scanner recovers the
+      // absolute form, which resolves to the catalog's path.
+      expect(recovered?.image?.endsWith(product.image)).toBe(true)
       expect(recovered?.brand).toBe(product.brand)
     }
   })

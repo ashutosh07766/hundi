@@ -394,6 +394,14 @@ input:focus {
   color: var(--danger);
 }
 
+.status--pending {
+  color: var(--warn);
+}
+
+.status--busy {
+  color: var(--text-dim);
+}
+
 /* Ledger */
 .ledger {
   list-style: none;

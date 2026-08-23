@@ -17,3 +17,18 @@ export function getDashboardToken(): string {
 export function setDashboardToken(token: string): void {
   localStorage.setItem(DASHBOARD_TOKEN_KEY, token)
 }
+
+const STORE_URL_KEY = 'hundi.storeUrl'
+const DEFAULT_STORE_URL = 'http://127.0.0.1:8791'
+
+/** Base URL of the demo storefront the "Run test purchase" buttons shop
+ * against (apps/store). Operator-editable and localStorage-backed, unlike
+ * FACILITATOR_URL above, because the store — unlike the facilitator's
+ * CORS-pinned origin — has no fixed relationship to where the dashboard runs. */
+export function getStoreUrl(): string {
+  return localStorage.getItem(STORE_URL_KEY) ?? DEFAULT_STORE_URL
+}
+
+export function setStoreUrl(url: string): void {
+  localStorage.setItem(STORE_URL_KEY, url)
+}

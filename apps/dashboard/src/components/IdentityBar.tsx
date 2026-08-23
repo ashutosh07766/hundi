@@ -13,12 +13,15 @@ export function IdentityBar() {
     resetHuman,
     dashboardToken,
     setDashboardToken,
+    storeUrl,
+    setStoreUrl,
     signerMode,
     passkey,
     passkeyNotice,
     selectSignerMode,
   } = useIdentity()
   const [tokenDraft, setTokenDraft] = useState(dashboardToken)
+  const [storeDraft, setStoreDraft] = useState(storeUrl)
   const [switchingTo, setSwitchingTo] = useState<SignerMode | null>(null)
 
   async function handleModeSelect(mode: SignerMode) {
@@ -43,6 +46,26 @@ export function IdentityBar() {
           <span className="identity-bar__label">Facilitator</span>
           <code className="identity-bar__value">{FACILITATOR_URL}</code>
         </div>
+
+        <form
+          className="identity-bar__field"
+          onSubmit={(e) => {
+            e.preventDefault()
+            setStoreUrl(storeDraft)
+          }}
+        >
+          <span className="identity-bar__label">Store</span>
+          <input
+            className="identity-bar__input"
+            type="text"
+            value={storeDraft}
+            placeholder="http://127.0.0.1:8791"
+            onChange={(e) => setStoreDraft(e.target.value)}
+          />
+          <button type="submit" className="btn btn--ghost btn--small">
+            Save
+          </button>
+        </form>
 
         <div className="identity-bar__field">
           <span className="identity-bar__label">Signer</span>

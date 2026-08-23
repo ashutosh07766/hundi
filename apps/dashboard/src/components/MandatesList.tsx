@@ -2,12 +2,43 @@ import type { IntentMandate } from '@hundi/core'
 import { useState } from 'react'
 import { useIdentity } from '../context/identity-context.js'
 import { usePolling } from '../hooks/use-polling.js'
+import { loadAgentKeyRecord } from '../lib/agent-key.js'
 import type { MandateListItem } from '../lib/api.js'
 import { listMandates, postRevoke } from '../lib/api.js'
+import type { TestPurchaseResult } from '../lib/buyer.js'
+import { runTestPurchase } from '../lib/buyer.js'
+import { FACILITATOR_URL } from '../lib/config.js'
 import { formatPaise } from '../lib/format.js'
 import { signRevoke } from '../lib/intent.js'
 
 type RowStatus = { pending: boolean; error: string | null }
+
+type PurchaseKind = 'ok' | 'pending' | 'blocked' | 'error' | 'busy'
+type PurchaseStatus = { kind: PurchaseKind; message: string }
+
+function purchaseStatusClass(kind: PurchaseKind): string {
+  if (kind === 'ok') return 'status status--ok'
+  if (kind === 'pending') return 'status status--pending'
+  if (kind === 'blocked' || kind === 'error') return 'status status--error'
+  return 'status status--busy'
+}
+
+function outcomeKind(result: TestPurchaseResult): PurchaseKind {
+  if (result.state === 'captured') return 'ok'
+  if (result.state === 'pending_approval') return 'pending'
+  return 'blocked'
+}
+
+function describeOutcome(result: TestPurchaseResult): string {
+  const chosen = result.chosen
+    ? `${result.chosen.title} at ${formatPaise(result.chosen.price_paise)}`
+    : null
+  if (result.state === 'captured') return `✓ captured${chosen ? ` — ${chosen}` : ''}`
+  if (result.state === 'pending_approval') {
+    return `⏳ pending approval${chosen ? ` — ${chosen}` : ''} → go to Pending approvals to sign off`
+  }
+  return `✗ blocked: ${result.reason ?? result.state}`
+}
 
 function safeParseIntent(intentJson: string): IntentMandate | null {
   try {
@@ -18,9 +49,10 @@ function safeParseIntent(intentJson: string): IntentMandate | null {
 }
 
 export function MandatesList() {
-  const { humanSign } = useIdentity()
+  const { humanSign, storeUrl } = useIdentity()
   const { data: mandates, error: pollError, loading } = usePolling(listMandates, 2000)
   const [statusById, setStatusById] = useState<Record<string, RowStatus>>({})
+  const [purchaseById, setPurchaseById] = useState<Record<string, PurchaseStatus>>({})
 
   async function revoke(mandateId: string) {
     setStatusById((prev) => ({ ...prev, [mandateId]: { pending: true, error: null } }))
@@ -32,6 +64,36 @@ export function MandatesList() {
       setStatusById((prev) => ({
         ...prev,
         [mandateId]: { pending: false, error: err instanceof Error ? err.message : String(err) },
+      }))
+    }
+  }
+
+  async function runTest(mandateId: string, intent: IntentMandate, poisoned: boolean) {
+    const agentKey = loadAgentKeyRecord(mandateId)
+    if (agentKey?.kind !== 'local') return
+    setPurchaseById((prev) => ({ ...prev, [mandateId]: { kind: 'busy', message: 'shopping…' } }))
+    try {
+      const result = await runTestPurchase({
+        mandateId,
+        intent,
+        agentKeyPair: agentKey,
+        storeUrl,
+        facilitatorUrl: FACILITATOR_URL,
+        poisoned,
+        onStep: (message) =>
+          setPurchaseById((prev) => ({ ...prev, [mandateId]: { kind: 'busy', message } })),
+      })
+      setPurchaseById((prev) => ({
+        ...prev,
+        [mandateId]: { kind: outcomeKind(result), message: describeOutcome(result) },
+      }))
+    } catch (err) {
+      setPurchaseById((prev) => ({
+        ...prev,
+        [mandateId]: {
+          kind: 'error',
+          message: err instanceof Error ? err.message : String(err),
+        },
       }))
     }
   }
@@ -55,7 +117,16 @@ export function MandatesList() {
         {rows.map((row) => {
           const intent = safeParseIntent(row.intent_json)
           const status = statusById[row.mandate_id]
+          const purchase = purchaseById[row.mandate_id]
           const revoked = row.revoked_at !== null
+          const agentKey = loadAgentKeyRecord(row.mandate_id)
+          const canRunPurchase = agentKey?.kind === 'local'
+          const purchaseDisabledTitle = canRunPurchase
+            ? undefined
+            : agentKey?.kind === 'external'
+              ? 'agent key held externally'
+              : 'no agent key stored for this mandate'
+          const purchaseButtonsDisabled = !canRunPurchase || purchase?.kind === 'busy'
           return (
             <article className="card" key={row.mandate_id}>
               <div className="card__row">
@@ -88,8 +159,31 @@ export function MandatesList() {
                     {status?.pending ? 'Revoking…' : 'Revoke'}
                   </button>
                 )}
+                {intent && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--small"
+                      disabled={purchaseButtonsDisabled}
+                      title={purchaseDisabledTitle}
+                      onClick={() => runTest(row.mandate_id, intent, false)}
+                    >
+                      {purchase?.kind === 'busy' ? 'Running…' : 'Run test purchase'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--small"
+                      disabled={purchaseButtonsDisabled}
+                      title={purchaseDisabledTitle}
+                      onClick={() => runTest(row.mandate_id, intent, true)}
+                    >
+                      {purchase?.kind === 'busy' ? 'Running…' : 'Run scam test'}
+                    </button>
+                  </>
+                )}
                 {status?.error && <span className="status status--error">{status.error}</span>}
               </div>
+              {purchase && <p className={purchaseStatusClass(purchase.kind)}>{purchase.message}</p>}
             </article>
           )
         })}

@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { useIdentity } from '../context/identity-context.js'
+import { markExternalAgentKey, saveLocalAgentKey } from '../lib/agent-key.js'
 import { mintCeremonyToken, registerMandate } from '../lib/api.js'
 import { rupeesToPaise } from '../lib/format.js'
 import type { SignedCeremony } from '../lib/intent.js'
@@ -93,7 +94,15 @@ export function MandateCeremony() {
         ceremonyToken,
       )
       setResult({ ceremony, mandateId })
-      if (mintedEphemeral) setEphemeralAgentKey(mintedEphemeral)
+      // Persist the AGENT key so "Run test purchase" can sign a cart with it later —
+      // see agent-key.ts. Only the ephemeral (minted-here) key has a private half to
+      // store; a pasted-in agent pubkey is held externally by definition.
+      if (mintedEphemeral) {
+        setEphemeralAgentKey(mintedEphemeral)
+        saveLocalAgentKey(mandateId, mintedEphemeral)
+      } else {
+        markExternalAgentKey(mandateId)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -190,8 +199,9 @@ export function MandateCeremony() {
         <div className="banner banner--warning">
           <p>
             <strong>Give this to the agent.</strong> No agent key was provided, so an ephemeral one
-            was minted. The agent needs its private key to sign carts; the dashboard does not keep a
-            copy.
+            was minted. It's also saved in this browser (keyed to the mandate) so the "Run test
+            purchase" button below can drive a purchase with it — a real agent process should get
+            its own copy of the private key too.
           </p>
           <p>
             Agent public key: <code>{ephemeralAgentKey.publicKeyHex}</code>

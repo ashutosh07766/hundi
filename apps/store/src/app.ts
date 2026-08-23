@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { cors } from 'hono/cors'
 import { type Availability, catalog, MERCHANT_ID, type Product } from './catalog.js'
 import { POISON_PRODUCT } from './poison-fixture.js'
 
@@ -126,6 +127,10 @@ function productImageSvg(product: Product): string {
 
 export function createApp(): Hono {
   const app = new Hono()
+
+  // The catalog is a public agent-readable surface; allow cross-origin reads
+  // (e.g. the dashboard's in-browser buyer fetching /api/catalog).
+  app.use('*', cors())
 
   app.get('/img/:id', (c) => {
     const product = catalog.find((p) => p.id === c.req.param('id'))

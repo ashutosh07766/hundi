@@ -5,6 +5,7 @@ import { loadEnv } from './env.js'
 import { createExecutor } from './executor.js'
 import { createCheckoutDriver } from './rails/checkout-driver.js'
 import { createRazorpayClient } from './razorpay-client.js'
+import { createSweep } from './sweep.js'
 
 // Boots only against the loopback interface: this process holds Razorpay secrets and
 // mints ceremony tokens, so it must never be reachable except through a trusted
@@ -24,7 +25,21 @@ const driver = createCheckoutDriver({
 })
 const executor = createExecutor({ db, env, driver })
 
-const app = createApp({ db, executor, env })
+const app = createApp({ db, executor, env, razorpay })
+
+// The sweep is production-only infra (app.ts stays free of timers so tests drive
+// sweep.runOnce() directly instead of racing a live interval).
+const sweep = createSweep({
+  db,
+  deps: {
+    razorpay,
+    executor,
+    now: () => Math.floor(Date.now() / 1000),
+    ttls: { approvalTtlMs: env.APPROVAL_TTL_MS },
+  },
+  intervalMs: env.SWEEP_INTERVAL_MS,
+})
+sweep.start()
 
 serve({ fetch: app.fetch, hostname: '127.0.0.1', port: env.PORT }, (info) => {
   console.log(`facilitator listening on http://127.0.0.1:${info.port}`)

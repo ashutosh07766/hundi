@@ -20,6 +20,13 @@ const envSchema = z.object({
   // Distinct from PORT — it's a same-process HTTP server serving a static Standard
   // Checkout launcher page, not the facilitator API.
   CHECKOUT_PAGE_PORT: z.coerce.number().int().positive().default(8788),
+  // How often the reconciliation sweep (sweep.ts) ticks in production (serve.ts).
+  // Tests construct a sweep directly with their own interval/TTLs and never read this.
+  SWEEP_INTERVAL_MS: z.coerce.number().int().positive().default(12_000),
+  // The fixed cap on how long a `pending_approval` settlement waits for a human
+  // decision before the sweep abandons it — capped further by the mandate's own
+  // expiry (see /approvals, which computes the same min() at decision time).
+  APPROVAL_TTL_MS: z.coerce.number().int().positive().default(1_800_000),
 })
 
 export type Env = z.infer<typeof envSchema>

@@ -4,6 +4,7 @@ import { cors } from 'hono/cors'
 import type { Env } from './env.js'
 import { errorBody, RouteError } from './errors.js'
 import type { Executor } from './executor.js'
+import type { RazorpayClient } from './razorpay-client.js'
 import { registerAdminRoutes } from './routes/admin.js'
 import { registerApprovalRoutes } from './routes/approvals.js'
 import { registerCeremonyTokenRoutes } from './routes/ceremony-tokens.js'
@@ -11,6 +12,7 @@ import { registerMandateRoutes } from './routes/mandates.js'
 import { registerRevokeRoute } from './routes/revoke.js'
 import { registerSettlementRoutes } from './routes/settlements.js'
 import { registerVerifyRoute } from './routes/verify.js'
+import { registerWebhookRoutes } from './routes/webhook.js'
 
 /** The dashboard's local dev origin — the only browser origin ever allowed to call
  * this API directly. Any other consumer (agents, s2s) doesn't send an Origin header
@@ -21,6 +23,7 @@ export type AppDeps = {
   db: Database.Database
   executor: Executor
   env: Env
+  razorpay: RazorpayClient
 }
 
 /** Builds the Hono app with `deps` injected — tests pass an in-memory db and a
@@ -46,6 +49,7 @@ export function createApp(deps: AppDeps): Hono {
   registerApprovalRoutes(app, deps)
   registerRevokeRoute(app, deps)
   registerAdminRoutes(app, deps)
+  registerWebhookRoutes(app, deps)
 
   return app
 }

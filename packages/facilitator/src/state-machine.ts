@@ -37,9 +37,13 @@ export class StaleTransition extends Error {
 }
 
 export const SETTLEMENT_TRANSITIONS: Record<SettlementState, readonly SettlementState[]> = {
-  created: ['verifying'],
-  verifying: ['verified', 'rejected'],
-  verified: ['pending_approval', 'approved'],
+  // created/verifying are normally traversed synchronously within the request that
+  // creates the settlement (see settlement-service.ts) — a row observed sitting in
+  // either state is a stranded transient (crash mid-request), which is why both allow
+  // a direct path to `abandoned` for the reconciliation sweep (sweep.ts) to use.
+  created: ['verifying', 'abandoned'],
+  verifying: ['verified', 'rejected', 'abandoned'],
+  verified: ['pending_approval', 'approved', 'abandoned'],
   pending_approval: ['approved', 'rejected', 'abandoned'],
   approved: ['settling', 'rejected', 'abandoned'],
   settling: ['captured', 'failed', 'abandoned'],

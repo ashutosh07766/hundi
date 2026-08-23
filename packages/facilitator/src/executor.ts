@@ -30,18 +30,33 @@ import { getMandateRow, intentFromRow } from './mandate-repo.js'
 import type { SettleViaCheckoutResult } from './rails/checkout-driver.js'
 import type { RazorpayClient, RazorpayPaymentLink } from './razorpay-client.js'
 import { createRazorpayClient } from './razorpay-client.js'
+import { applyCapture } from './reconcile.js'
 import type { AttemptState } from './state-machine.js'
 import { StaleTransition, transitionAttempt, transitionSettlement } from './state-machine.js'
 import { buildVerifyCtx } from './verify-logic.js'
 
+// Re-exported so existing callers (tests, and any future webhook/sweep code) can keep
+// importing the capture compensator from executor.ts — the implementation lives in
+// reconcile.ts alongside the rest of the reconciliation authority.
+export { handleProviderCapture, type ProviderCaptureEvent } from './reconcile.js'
+
 export interface Executor {
   execute(settlementId: string): void
+  /** Resumes a settlement already sitting in `settling` with no active attempt —
+   * the executor died or was restarted mid-flight. Unlike `execute`, this skips
+   * the approved -> settling reverify CAS (the settlement already passed it) and
+   * goes straight into the attempt loop. Kicked by the reconciliation sweep
+   * (sweep.ts); a settlement with a live attempt already in flight is a no-op. */
+  resumeSettling(settlementId: string): void
 }
 
 export const noopExecutor: Executor = {
   execute(_settlementId: string): void {
     // Used wherever a real executor hasn't been wired up (tests, the seam
     // before createExecutor existed). See createExecutor for the real thing.
+  },
+  resumeSettling(_settlementId: string): void {
+    // See execute() above — same "not wired up yet" placeholder.
   },
 }
 
@@ -55,17 +70,6 @@ type SettlementRow = {
   amount_paise: number
   merchant_id: string
   state: string
-}
-
-type AttemptRow = {
-  id: string
-  settlement_id: string
-  method: string
-  state: string
-  receipt: string
-  provider_order_id: string | null
-  provider_payment_id: string | null
-  provider_link_id: string | null
 }
 
 /** Driver interface the executor depends on — the real checkout driver
@@ -237,23 +241,27 @@ async function fallbackToPaymentLink(
 }
 
 /**
- * Runs one settle to completion: reverify -> up to MAX_ATTEMPTS checkout-driver
- * attempts -> payment-link fallback. Exported (in addition to the fire-and-forget
- * `Executor.execute`) so tests and the smoke script can await a single run directly
- * instead of polling for the async kick to finish.
+ * Drives `settlement` (already in `settling`) through up to MAX_ATTEMPTS
+ * checkout-driver attempts, falling back to a payment link if all of them
+ * fail. Counts attempts already on the row so a resumed settlement (see
+ * `resumeSettling`) picks up where a crashed process left off instead of
+ * re-spending its attempt budget from zero.
  */
-export async function runOnce(deps: RunnerDeps, settlementId: string): Promise<ExecutionOutcome> {
-  const reverify = reverifyAndEnterSettling(deps.db, settlementId, deps.now())
-  if (!reverify.ok) {
-    return reverify.reason === 'rejected'
-      ? { kind: 'rejected', reason: reverify.rejectReason }
-      : { kind: 'no_op' }
-  }
-
-  const settlement = reverify.settlement
+async function runAttemptLoop(
+  deps: RunnerDeps,
+  settlement: SettlementRow,
+): Promise<ExecutionOutcome> {
+  const settlementId = settlement.id
+  const existingAttempts = (
+    deps.db
+      .prepare(
+        `SELECT COUNT(*) c FROM settlement_attempts WHERE settlement_id = ? AND method = 'checkout_driver'`,
+      )
+      .get(settlementId) as { c: number }
+  ).c
   let lastAttemptId = ''
 
-  for (let attemptNum = 1; attemptNum <= MAX_ATTEMPTS; attemptNum++) {
+  for (let attemptNum = existingAttempts + 1; attemptNum <= MAX_ATTEMPTS; attemptNum++) {
     const attemptId = randomUUID()
     lastAttemptId = attemptId
     const receipt = `settle-${settlementId}-${attemptNum}-${attemptId.slice(0, 8)}`
@@ -309,40 +317,18 @@ export async function runOnce(deps: RunnerDeps, settlementId: string): Promise<E
     })
 
     if (driverResult.ok && driverResult.status === 'captured' && driverResult.paymentId) {
-      const paymentId = driverResult.paymentId
-      let captured = false
-      tx(deps.db, () => {
-        try {
-          transitionAttempt(deps.db, attemptId, 'initiated', 'captured')
-        } catch (err) {
-          if (err instanceof StaleTransition) return
-          throw err
-        }
-        deps.db
-          .prepare(
-            'UPDATE settlement_attempts SET provider_payment_id = ?, updated_at = unixepoch() WHERE id = ?',
-          )
-          .run(paymentId, attemptId)
-        // one_captured_attempt + one_live_settlement_per_mandate (schema.sql) are the
-        // actual double-capture guards; this transition failing would mean a settlement
-        // this executor already holds single-flight on somehow moved out from under it.
-        transitionSettlement(deps.db, settlementId, 'settling', 'captured')
-        deps.db
-          .prepare(`UPDATE allowances SET state = 'consumed' WHERE mandate_id = ?`)
-          .run(settlement.mandate_id)
-        appendLedger(deps.db, {
-          event_type: 'payment_captured',
-          settlement_id: settlementId,
-          actor: 'facilitator',
-          payload: {
-            attempt_id: attemptId,
-            provider_order_id: providerOrderId,
-            provider_payment_id: paymentId,
-          },
-        })
-        captured = true
-      })
-      if (captured) return { kind: 'captured', attemptId, paymentId }
+      const captured = applyCapture(
+        deps.db,
+        {
+          attemptId,
+          attemptState: 'initiated',
+          settlementId,
+          mandateId: settlement.mandate_id,
+          providerOrderId,
+        },
+        driverResult.paymentId,
+      )
+      if (captured) return { kind: 'captured', attemptId, paymentId: driverResult.paymentId }
     }
 
     tx(deps.db, () => {
@@ -366,6 +352,56 @@ export async function runOnce(deps: RunnerDeps, settlementId: string): Promise<E
   }
 
   return fallbackToPaymentLink(deps, settlementId, settlement, lastAttemptId)
+}
+
+/**
+ * Runs one settle to completion: reverify -> up to MAX_ATTEMPTS checkout-driver
+ * attempts -> payment-link fallback. Exported (in addition to the fire-and-forget
+ * `Executor.execute`) so tests and the smoke script can await a single run directly
+ * instead of polling for the async kick to finish.
+ */
+export async function runOnce(deps: RunnerDeps, settlementId: string): Promise<ExecutionOutcome> {
+  const reverify = reverifyAndEnterSettling(deps.db, settlementId, deps.now())
+  if (!reverify.ok) {
+    return reverify.reason === 'rejected'
+      ? { kind: 'rejected', reason: reverify.rejectReason }
+      : { kind: 'no_op' }
+  }
+  return runAttemptLoop(deps, reverify.settlement)
+}
+
+/**
+ * Resumes a settlement already sitting in `settling` — the reverify ->
+ * settling CAS already happened, so unlike `runOnce` this skips straight to
+ * the attempt loop. Used by the reconciliation sweep to recover a settlement
+ * whose executor process died between entering `settling` and inserting its
+ * first attempt row (or between one attempt failing and the next starting).
+ * A no-op if the settlement isn't `settling` anymore, or already has a live
+ * attempt (someone else — the original executor run, or a concurrent resume
+ * — already has it in hand). Exported under a distinct name from the
+ * `Executor.resumeSettling` method (which calls this) so the method body
+ * doesn't read as an accidental self-recursive call.
+ */
+export async function resumeSettlingRun(
+  deps: RunnerDeps,
+  settlementId: string,
+): Promise<ExecutionOutcome> {
+  const settlement = deps.db
+    .prepare(
+      `SELECT id, mandate_id, cart_json, mandate_cart_hash_hex, amount_paise, merchant_id, state
+       FROM settlements WHERE id = ?`,
+    )
+    .get(settlementId) as SettlementRow | undefined
+  if (settlement?.state !== 'settling') return { kind: 'no_op' }
+
+  const active = deps.db
+    .prepare(
+      `SELECT 1 FROM settlement_attempts WHERE settlement_id = ? AND state IN ('initiated','awaiting_confirmation')`,
+    )
+    .get(settlementId)
+  if (active) return { kind: 'no_op' }
+
+  return runAttemptLoop(deps, settlement)
 }
 
 export type ExecutorDeps = {
@@ -408,137 +444,40 @@ export function createExecutor(deps: ExecutorDeps): Executor & ExecutorTestHooks
   // Only one settle in flight process-wide (the checkout driver drives a single
   // real browser) — every kick is chained onto the same promise. Per-id dedup on
   // top means a repeat kick for a settlement already queued/running is a no-op
-  // rather than a second entry in the chain.
+  // rather than a second entry in the chain. `execute` and `resumeSettling` share
+  // the same `inFlight` set — the invariant they're both protecting ("this
+  // settlement id has at most one attempt loop running") doesn't care which entry
+  // point started it.
   const inFlight = new Set<string>()
   let chain: Promise<void> = Promise.resolve()
 
+  function kick(settlementId: string, run: () => Promise<ExecutionOutcome>): void {
+    if (inFlight.has(settlementId)) return
+    inFlight.add(settlementId)
+    chain = chain
+      .then(run)
+      .then(
+        (outcome) => {
+          console.log(JSON.stringify({ event: 'executor_outcome', settlementId, outcome }))
+        },
+        (err) => {
+          console.error(`executor: unhandled error settling ${settlementId}:`, err)
+        },
+      )
+      .finally(() => {
+        inFlight.delete(settlementId)
+      })
+  }
+
   return {
     execute(settlementId: string): void {
-      if (inFlight.has(settlementId)) return
-      inFlight.add(settlementId)
-      chain = chain
-        .then(() => runOnce(runnerDeps, settlementId))
-        .then(
-          (outcome) => {
-            console.log(JSON.stringify({ event: 'executor_outcome', settlementId, outcome }))
-          },
-          (err) => {
-            console.error(`executor: unhandled error settling ${settlementId}:`, err)
-          },
-        )
-        .finally(() => {
-          inFlight.delete(settlementId)
-        })
+      kick(settlementId, () => runOnce(runnerDeps, settlementId))
+    },
+    resumeSettling(settlementId: string): void {
+      kick(settlementId, () => resumeSettlingRun(runnerDeps, settlementId))
     },
     waitForIdle(): Promise<void> {
       return chain
     },
-  }
-}
-
-export type ProviderCaptureEvent = { orderId?: string; paymentId?: string }
-
-/**
- * Reconciles a capture notification (webhook or sweep, wired up in U8) against
- * our own settlement state. A capture for the attempt this executor is actively
- * driving is a normal confirmation and isn't this function's concern — this
- * exists for the two paths where money moved that our state machine didn't
- * expect: a capture landing after the settlement already went terminal (a crash
- * or timeout mid-attempt, with the provider completing it late), or a second
- * capture racing in when a captured attempt already exists for that settlement.
- * Both mean Razorpay took the customer's money for something we can no longer
- * honor as a live settlement, so the only correct move is to give it back.
- */
-export async function handleProviderCapture(
-  deps: { db: Database.Database; razorpay: RazorpayClient },
-  event: ProviderCaptureEvent,
-): Promise<void> {
-  const { db, razorpay } = deps
-
-  const attempt = event.orderId
-    ? (db
-        .prepare('SELECT * FROM settlement_attempts WHERE provider_order_id = ?')
-        .get(event.orderId) as AttemptRow | undefined)
-    : (db
-        .prepare('SELECT * FROM settlement_attempts WHERE provider_payment_id = ?')
-        .get(event.paymentId) as AttemptRow | undefined)
-
-  if (!attempt) {
-    tx(db, () => {
-      appendLedger(db, {
-        event_type: 'reconciliation_flagged',
-        actor: 'facilitator',
-        payload: { reason: 'capture_for_unknown_attempt', ...event },
-      })
-    })
-    return
-  }
-
-  const paymentId = event.paymentId ?? attempt.provider_payment_id ?? undefined
-  if (!paymentId) {
-    tx(db, () => {
-      appendLedger(db, {
-        event_type: 'reconciliation_flagged',
-        settlement_id: attempt.settlement_id,
-        actor: 'facilitator',
-        payload: { reason: 'capture_missing_payment_id', attempt_id: attempt.id },
-      })
-    })
-    return
-  }
-
-  // This exact capture is already the one this executor recorded — a normal
-  // confirming webhook, not an anomaly.
-  if (attempt.state === 'captured') return
-
-  const settlement = db
-    .prepare('SELECT state FROM settlements WHERE id = ?')
-    .get(attempt.settlement_id) as { state: string } | undefined
-  const existingCaptured = db
-    .prepare(`SELECT id FROM settlement_attempts WHERE settlement_id = ? AND state = 'captured'`)
-    .get(attempt.settlement_id) as { id: string } | undefined
-
-  const isAnomaly = settlement?.state !== 'settling' || existingCaptured !== undefined
-  if (!isAnomaly) return
-
-  const alreadyRefunded = (
-    db
-      .prepare(
-        `SELECT payload FROM ledger_events WHERE event_type = 'anomaly_refund_issued' AND settlement_id = ?`,
-      )
-      .all(attempt.settlement_id) as { payload: string }[]
-  ).some((row) => (JSON.parse(row.payload) as { payment_id?: string }).payment_id === paymentId)
-  if (alreadyRefunded) return
-
-  try {
-    const refund = await razorpay.refundPayment({
-      paymentId,
-      idempotencyKey: `refund-${attempt.id}-${paymentId}`,
-    })
-    tx(db, () => {
-      appendLedger(db, {
-        event_type: 'anomaly_refund_issued',
-        settlement_id: attempt.settlement_id,
-        actor: 'facilitator',
-        payload: { attempt_id: attempt.id, payment_id: paymentId, refund_id: refund.id },
-      })
-    })
-  } catch (err) {
-    // Do not throw: the caller (a webhook handler) must still ack the delivery, and a
-    // stuck refund is a reconciliation job's problem, not a reason to retry-storm the
-    // provider from inside a webhook request.
-    tx(db, () => {
-      appendLedger(db, {
-        event_type: 'reconciliation_flagged',
-        settlement_id: attempt.settlement_id,
-        actor: 'facilitator',
-        payload: {
-          reason: 'refund_api_error',
-          attempt_id: attempt.id,
-          payment_id: paymentId,
-          detail: errMessage(err),
-        },
-      })
-    })
   }
 }

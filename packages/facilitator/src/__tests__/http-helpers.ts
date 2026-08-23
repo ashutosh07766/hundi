@@ -3,14 +3,21 @@ import type { Hono } from 'hono'
 import { createApp } from '../app.js'
 import type { Env } from '../env.js'
 import type { Executor } from '../executor.js'
+import type { RazorpayClient } from '../razorpay-client.js'
+import { makeFakeRazorpay } from './executor-helpers.js'
 import { openTestDb } from './helpers.js'
 
-export function makeFakeExecutor(): Executor & { calls: string[] } {
+export function makeFakeExecutor(): Executor & { calls: string[]; resumeCalls: string[] } {
   const calls: string[] = []
+  const resumeCalls: string[] = []
   return {
     calls,
+    resumeCalls,
     execute(settlementId: string): void {
       calls.push(settlementId)
+    },
+    resumeSettling(settlementId: string): void {
+      resumeCalls.push(settlementId)
     },
   }
 }
@@ -24,20 +31,26 @@ export const TEST_ENV: Env = {
   DB_PATH: ':memory:',
   PORT: 8790,
   CHECKOUT_PAGE_PORT: 8788,
+  SWEEP_INTERVAL_MS: 12_000,
+  APPROVAL_TTL_MS: 1_800_000,
 }
 
 /** Fresh in-memory-db app + fake executor per call, matching openTestDb's "tests never
- * share state" discipline. Returns the app plus the db/executor handles tests need to
- * assert on directly (executor.calls, or driving the db out-of-band). */
-export function makeTestApp(): {
+ * share state" discipline. Returns the app plus the db/executor/razorpay handles tests
+ * need to assert on directly (executor.calls, razorpay spies, or driving the db
+ * out-of-band). `razorpay` defaults to the same in-memory fake executor-helpers.ts
+ * tests use — pass one in to control fetchOrderPayments for webhook tests. */
+export function makeTestApp(opts: { razorpay?: RazorpayClient } = {}): {
   app: Hono
   db: ReturnType<typeof openTestDb>
-  executor: Executor & { calls: string[] }
+  executor: Executor & { calls: string[]; resumeCalls: string[] }
+  razorpay: RazorpayClient
 } {
   const db = openTestDb()
   const executor = makeFakeExecutor()
-  const app = createApp({ db, executor, env: TEST_ENV })
-  return { app, db, executor }
+  const razorpay = opts.razorpay ?? makeFakeRazorpay()
+  const app = createApp({ db, executor, env: TEST_ENV, razorpay })
+  return { app, db, executor, razorpay }
 }
 
 export async function postJson(

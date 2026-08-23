@@ -12,7 +12,7 @@
  */
 
 import { zValidator } from '@hono/zod-validator'
-import { scanStore as defaultScanStore } from '@hundi/cli/scanner'
+import { deriveMerchantId, scanStore as defaultScanStore } from '@hundi/cli/scanner'
 import type { Hono } from 'hono'
 import type { AppDeps } from '../app.js'
 import { browserScanShopify as defaultBrowserScan } from '../browser-scan.js'
@@ -47,31 +47,28 @@ export function registerStoreRoutes(app: Hono, deps: AppDeps): void {
     async (c) => {
       const { url } = c.req.valid('json')
 
-      let scanResult: Awaited<ReturnType<typeof scan>>
+      // Bot-protection (a Cloudflare challenge) can make the fast server-side scan
+      // either return zero products OR throw a hard 4xx. BOTH cases must fall through
+      // to the browser fallback — the merchant_id is derived from the URL the same way
+      // the scanner would, so a thrown scan doesn't lose it.
+      let merchantId = deriveMerchantId(url)
+      let products: ReturnType<typeof toFeedProducts> = []
+      const warnings: string[] = []
+      let scanError: string | null = null
+
       try {
-        scanResult = await scan(url)
+        const scanResult = await scan(url)
+        merchantId = scanResult.merchant_id
+        products = toFeedProducts(scanResult)
       } catch (err) {
-        return c.json(
-          {
-            ok: false,
-            error: 'SCAN_FAILED',
-            detail: err instanceof Error ? err.message : String(err),
-          },
-          200,
-        )
+        scanError = err instanceof Error ? err.message : String(err)
       }
 
-      let products = toFeedProducts(scanResult)
-      const warnings: string[] = []
-
-      // The fast server-side scan comes up empty on stores whose bot-protection blocks
-      // Node's `fetch` (a Cloudflare challenge, for example) while still serving a real
-      // browser normally. Only paid for when the cheap path already failed.
       if (products.length === 0) {
-        const browserResult = await browserScan(url, scanResult.merchant_id)
+        const browserResult = await browserScan(url, merchantId)
         if (browserResult.products.length > 0) {
           products = toFeedProducts({
-            merchant_id: scanResult.merchant_id,
+            merchant_id: merchantId,
             products: browserResult.products,
             warnings: browserResult.warnings,
           })
@@ -83,14 +80,15 @@ export function registerStoreRoutes(app: Hono, deps: AppDeps): void {
         return c.json(
           {
             ok: false,
-            error: 'NO_PRODUCTS',
-            detail: 'store has no usable schema.org product markup',
+            error: scanError ? 'SCAN_FAILED' : 'NO_PRODUCTS',
+            detail:
+              scanError ??
+              'store exposes no schema.org product markup and no Shopify product feed',
           },
           200,
         )
       }
 
-      const merchantId = scanResult.merchant_id
       const name = deriveStoreName(url, merchantId)
       const catalogPrices: Record<string, number> = {}
       for (const p of products) catalogPrices[p.id] = p.price_paise

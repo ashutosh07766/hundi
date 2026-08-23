@@ -19,7 +19,10 @@ export type SigEnvelope =
       signature_b64u: string
     }
 
-/** Ceiling authority an agent carries for a stated goal, signed by the agent's own key. */
+/** Ceiling authority a human grants an agent for a stated goal. Signed by the
+ * HUMAN key (the registered credential); the agent key it authorizes to sign
+ * carts is carried in `agent_pubkey_hex`. Two distinct keys — the agent can
+ * spend within the envelope but can never approve or revoke. */
 export type IntentMandate = {
   mandateId: string
   goal: string
@@ -49,7 +52,7 @@ export type CartMandate = {
   agent_sig_hex: string
 }
 
-/** Canonical bytes signed by the agent's intent signature — everything in `IntentMandate` but `sig`. */
+/** Canonical bytes covered by the human's intent signature — everything in `IntentMandate` but `sig`. */
 export function intentSigningBytes(intent: Omit<IntentMandate, 'sig'>): Uint8Array {
   return canonicalJson({
     mandateId: intent.mandateId,

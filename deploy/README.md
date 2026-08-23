@@ -265,3 +265,13 @@ the design is expected to fail, this is a verification gap, not a known
 defect. If `smoke:settle` fails specifically inside the container while
 `pnpm --filter @hundi/facilitator smoke:settle` still passes on bare metal,
 suspect the chromium/toolchain mismatch bullet first.
+
+## Verdict update (verified live, 2026-08-24)
+
+Built and ran on this machine via colima (docker 29.5.2):
+- Image builds clean: `hundi:spike`, **4.7 GB** (playwright/noble base; slimming possible later, not blocking).
+- Container boots: demo store (127.0.0.1:8791) + facilitator (127.0.0.1:8790) + socat public proxy (**0.0.0.0:8080** — map your host port to 8080, not 8790).
+- `GET /stores` 200 through the proxy; demo store auto-seeded (20 products).
+- **Full live capture inside the container: PASSED** — mandate registered via ceremony endpoints, below-threshold settlement, in-container chromium drove the Razorpay TEST netbanking flow to `captured`.
+
+Status: **WORKS.** Fly.io/Railway deploy per the commands above; remember the public port is 8080 and webhooks need the deployed URL registered in the Razorpay dashboard.

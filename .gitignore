@@ -8,3 +8,4 @@ dist/
 test-results/
 .DS_Store
 spikes/checkout-driver/artifacts/
+packages/facilitator/artifacts/

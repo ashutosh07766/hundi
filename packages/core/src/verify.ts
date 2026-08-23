@@ -111,6 +111,15 @@ function validateCartItemSchema(item: CartItem, index: number): string | undefin
   if (!isSafeInt(item.unit_price_paise) || item.unit_price_paise <= 0) {
     return `items[${index}].unit_price_paise must be a positive integer`
   }
+  // Both fields are optional (see CartItem's doc comments), but if present at all
+  // they must be well-typed — an empty-string variant_id is indistinguishable from
+  // "no variant" downstream, so it's rejected rather than silently treated as unset.
+  if (item.variant_id !== undefined && !isNonEmptyString(item.variant_id)) {
+    return `items[${index}].variant_id must be a non-empty string when present`
+  }
+  if (item.variant_label !== undefined && typeof item.variant_label !== 'string') {
+    return `items[${index}].variant_label must be a string when present`
+  }
   return undefined
 }
 

@@ -40,6 +40,16 @@ export type CartItem = {
   sku: string
   qty: number
   unit_price_paise: number
+  /** The specific variant (size/color) this line item buys, when the product has
+   * more than one. Included in `cartSigningBytes` — the agent's signature must
+   * cover the exact variant, or a variant swapped in after signing would still
+   * verify. Absent entirely (never `null`) when no variant was chosen, so a
+   * cart's signed bytes are byte-identical to the pre-variant shape. */
+  variant_id?: string
+  /** Display-only label for the chosen variant (e.g. "11 / Black"). Deliberately
+   * NOT part of `cartSigningBytes` — the signature's job is to pin down which SKU
+   * and variant get bought, not to certify a human-readable string derived from it. */
+  variant_label?: string
 }
 
 /** A concrete purchase the agent is proposing, chained to its authorizing intent by hash. */
@@ -75,6 +85,11 @@ export function cartSigningBytes(cart: Omit<CartMandate, 'agent_sig_hex'>): Uint
       sku: item.sku,
       qty: item.qty,
       unit_price_paise: item.unit_price_paise,
+      // Spread, not a plain field: canonicalJson throws on an explicit `undefined`
+      // leaf, and omitting the key entirely (rather than emitting `variant_id:
+      // null`) is what keeps a no-variant cart's signed bytes byte-identical to
+      // the pre-variant shape — see the field's doc comment above.
+      ...(item.variant_id ? { variant_id: item.variant_id } : {}),
     })),
     total_paise: cart.total_paise,
     intent_hash_hex: cart.intent_hash_hex,

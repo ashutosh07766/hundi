@@ -102,6 +102,54 @@ describe('verifyChain — one row per RejectionCode', () => {
     expect(result).toMatchObject({ ok: false, reason: 'SIG_INVALID_CART' })
   })
 
+  it('SIG_INVALID_CART: variant_id swapped after signing', () => {
+    // The agent signed a cart for one specific variant; a cart claiming the same
+    // sku/qty/price but a *different* variant_id must fail signature verification
+    // — this is the whole point of covering variant_id in cartSigningBytes.
+    const { intent, agent } = makeIntent()
+    const cart = makeCart({
+      agent,
+      intent,
+      items: [{ sku: 'sku-1', qty: 1, unit_price_paise: 100_000, variant_id: 'variant-11' }],
+    })
+    const swapped = {
+      ...cart,
+      items: [{ ...cart.items[0]!, variant_id: 'variant-12' }],
+    }
+    const result = verifyChain(intent, swapped, baseCtx({ credential: credentialFor(agent) }))
+    expect(result).toMatchObject({ ok: false, reason: 'SIG_INVALID_CART' })
+  })
+
+  it('SCHEMA_INVALID: empty-string variant_id', () => {
+    const { intent, agent } = makeIntent()
+    const cart = makeCart({
+      agent,
+      intent,
+      items: [{ sku: 'sku-1', qty: 1, unit_price_paise: 100_000, variant_id: '' }],
+    })
+    const result = verifyChain(intent, cart, baseCtx({ credential: credentialFor(agent) }))
+    expect(result).toMatchObject({ ok: false, reason: 'SCHEMA_INVALID' })
+  })
+
+  it('accepts a cart with a well-formed variant_id + variant_label', () => {
+    const { intent, agent } = makeIntent()
+    const cart = makeCart({
+      agent,
+      intent,
+      items: [
+        {
+          sku: 'sku-1',
+          qty: 1,
+          unit_price_paise: 100_000,
+          variant_id: 'variant-11',
+          variant_label: '11 / Black',
+        },
+      ],
+    })
+    const result = verifyChain(intent, cart, baseCtx({ credential: credentialFor(agent) }))
+    expect(result.ok).toBe(true)
+  })
+
   it('LINE_ITEM_INVALID: total does not match recomputed sum', () => {
     const { intent, agent } = makeIntent()
     // total_paise override alone would fail schema (it's still a valid non-negative int), so this

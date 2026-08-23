@@ -24,7 +24,6 @@ export type RejectionCode =
   | 'MANDATE_UNKNOWN'
   | 'SIG_INVALID_INTENT'
   | 'HASH_LINK_MISMATCH'
-  | 'AGENT_KEY_MISMATCH'
   | 'SIG_INVALID_CART'
   | 'LINE_ITEM_INVALID'
   | 'PRICE_MISMATCH'
@@ -39,7 +38,14 @@ export type RejectionCode =
 
 export type VerifyCtx = {
   now: number
-  /** Absent means the caller has no registered credential for this mandate's agent key. */
+  /**
+   * The mandate's registered credential — the HUMAN key bound at ceremony time.
+   * It verifies the intent signature (and, at the route layer, approvals and
+   * revocations). It is a distinct party from the agent key the intent carries
+   * in `agent_pubkey_hex`; the agent never holds this credential, which is what
+   * makes the human-in-the-loop gate a real second factor. Absent means no
+   * credential is registered for this mandate.
+   */
   credential?: Credential
   revoked: boolean
   allowance: 'available' | 'reserved' | 'consumed'
@@ -147,16 +153,17 @@ export function verifyChain(
   const intentHashHex = sha256Hex(intentBytes)
   if (cart.intent_hash_hex !== intentHashHex) return fail('HASH_LINK_MISMATCH')
 
-  // The credential that verified the intent signature must be the exact ed25519 key the
-  // intent declares as its agent key — otherwise a party holding a different valid credential
-  // could satisfy SIG_INVALID_INTENT without being the agent the intent actually authorizes.
-  if (credential.type !== 'ed25519' || credential.publicKey_hex !== intent.agent_pubkey_hex) {
-    return fail('AGENT_KEY_MISMATCH')
-  }
-
+  // The cart is verified against the AGENT key the intent declares, not the
+  // registered (human) credential. Those are two distinct parties: the human
+  // signs the intent (verified above), and the intent — being human-signed —
+  // attests the agent key, so the agent key is trustworthy precisely because
+  // the human vouched for it. The agent holds only this key; it can build and
+  // sign carts but cannot produce an approval or revocation, which require the
+  // human credential at the route layer.
   const cartBytes = cartSigningBytes(cart)
   const cartSig: SigEnvelope = { type: 'ed25519', signature_hex: cart.agent_sig_hex }
-  if (!verifyMandateSignature(cartBytes, cartSig, credential)) return fail('SIG_INVALID_CART')
+  const agentCredential: Credential = { type: 'ed25519', publicKey_hex: intent.agent_pubkey_hex }
+  if (!verifyMandateSignature(cartBytes, cartSig, agentCredential)) return fail('SIG_INVALID_CART')
 
   const recomputedTotal = cart.items.reduce(
     (sum, item) => sum + item.qty * item.unit_price_paise,

@@ -28,6 +28,24 @@ describe('verifyChain — happy path', () => {
       expect(result.mandateCartHashHex).toMatch(/^[0-9a-f]{64}$/)
     }
   })
+
+  it('accepts the two-key model: intent signed by a distinct human key, cart signed by the agent key', () => {
+    // The real separation-of-parties path — impossible before the fix, when the
+    // registered credential was forced to equal the agent key. The human key is
+    // the registered credential and verifies the intent; the agent key (attested
+    // by that human-signed intent) verifies the cart. They are different keys.
+    const human = makeEd25519Keypair(new Uint8Array(32).fill(11))
+    const agent = makeEd25519Keypair(new Uint8Array(32).fill(22))
+    expect(human.publicKeyHex).not.toBe(agent.publicKeyHex)
+    const { intent } = makeIntent({ agent, human })
+    const cart = makeCart({ agent, intent })
+    const result = verifyChain(intent, cart, baseCtx({ credential: credentialFor(human) }))
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.needsApproval).toBe(false)
+      expect(result.mandateCartHashHex).toMatch(/^[0-9a-f]{64}$/)
+    }
+  })
 })
 
 describe('verifyChain — one row per RejectionCode', () => {
@@ -63,16 +81,17 @@ describe('verifyChain — one row per RejectionCode', () => {
     expect(result).toMatchObject({ ok: false, reason: 'HASH_LINK_MISMATCH' })
   })
 
-  it('AGENT_KEY_MISMATCH: intent signed by its real key but claims a different agent_pubkey_hex', () => {
-    // The signature is genuinely valid (signed by `agent`), so SIG_INVALID_INTENT passes — the
-    // mismatch is that the payload's own agent_pubkey_hex field names a different key.
-    const otherAgent = makeEd25519Keypair(new Uint8Array(32).fill(42))
-    const { intent, agent } = makeIntent({
-      overrides: { agent_pubkey_hex: otherAgent.publicKeyHex },
-    })
-    const cart = makeCart({ agent, intent })
-    const result = verifyChain(intent, cart, baseCtx({ credential: credentialFor(agent) }))
-    expect(result).toMatchObject({ ok: false, reason: 'AGENT_KEY_MISMATCH' })
+  it('SIG_INVALID_CART: cart signed by a key that is not intent.agent_pubkey_hex', () => {
+    // Human signs the intent; the intent attests `agent`'s key as the cart signer.
+    // A cart signed by some *other* key must be rejected — the cart is verified
+    // against the attested agent key, never the registered (human) credential.
+    const human = makeEd25519Keypair(new Uint8Array(32).fill(11))
+    const agent = makeEd25519Keypair(new Uint8Array(32).fill(22))
+    const impostor = makeEd25519Keypair(new Uint8Array(32).fill(33))
+    const { intent } = makeIntent({ agent, human })
+    const cart = makeCart({ agent: impostor, intent })
+    const result = verifyChain(intent, cart, baseCtx({ credential: credentialFor(human) }))
+    expect(result).toMatchObject({ ok: false, reason: 'SIG_INVALID_CART' })
   })
 
   it('SIG_INVALID_CART: cart sig corrupted', () => {

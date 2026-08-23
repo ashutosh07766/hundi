@@ -57,7 +57,7 @@ export type ChatClient = {
   chatJson(args: {
     system: string
     user: string
-  }): Promise<{ chosen_sku?: string; reason?: string }>
+  }): Promise<{ chosen_sku?: string; reason?: string; chosen_variant_id?: string }>
 }
 
 export type LlmBrainDeps = {
@@ -72,22 +72,28 @@ const defaultLog: LogStep = (step, data) => {
   console.log(JSON.stringify({ step, ...data }))
 }
 
-type LlmPick = { chosen_sku: string; reason: string }
+type LlmPick = { chosen_sku: string; reason: string; chosen_variant_id?: string }
 
 /** Every reason `resolveChoice` can fall back to the scripted rule for —
  * logged verbatim so a demo transcript shows exactly why an override
- * happened. */
+ * happened. `VARIANT_NOT_FOUND` is distinct from the others: it never falls
+ * back to a substitute product (see `resolveChoice`) — a shopper who asked for
+ * a specific size that doesn't exist would rather be told than be sold a
+ * different product entirely. */
 export type GuardrailOverrideReason =
   | 'NO_LLM_PICK'
   | 'SKU_NOT_IN_CANDIDATES'
   | 'OUT_OF_STOCK'
   | 'OVER_CEILING'
+  | 'VARIANT_NOT_FOUND'
 
 type ResolvedChoice = {
   product: Product | undefined
   overridden: boolean
   overrideReason?: GuardrailOverrideReason
   llmReason?: string
+  variantId?: string
+  variantLabel?: string
 }
 
 /** Narrower than `LlmGoal` — just what the selection step (as opposed to the
@@ -107,6 +113,10 @@ export type ChooseProductArgs = {
 export type ChooseProductResult = {
   product?: Product
   chosen_sku?: string
+  /** The resolved variant's id/label, present only when the goal named a size/
+   * color that matched one of the chosen product's real variants. */
+  chosen_variant_id?: string
+  variant_label?: string
   reason?: string
   overridden: boolean
   override_reason?: GuardrailOverrideReason
@@ -146,9 +156,17 @@ export async function runLlmPurchase(
     llm_reason: choice.reason ?? null,
     overridden: choice.overridden,
     override_reason: choice.override_reason ?? null,
+    chosen_variant_id: choice.chosen_variant_id ?? null,
+    variant_label: choice.variant_label ?? null,
   })
 
-  const cart = tools.proposeCart([{ product, qty: 1 }])
+  const cart = tools.proposeCart([
+    {
+      product,
+      qty: 1,
+      ...(choice.chosen_variant_id ? { variantId: choice.chosen_variant_id } : {}),
+    },
+  ])
   log('propose_cart', { merchant_id: cart.merchant_id, total_paise: cart.total_paise })
 
   const willLikelyNeedApproval = cart.total_paise > goal.threshold_paise
@@ -208,6 +226,9 @@ export async function chooseProduct({
   const resolved = resolveChoice(pick, candidates, goal, log)
   return {
     ...(resolved.product ? { product: resolved.product, chosen_sku: resolved.product.id } : {}),
+    ...(resolved.variantId
+      ? { chosen_variant_id: resolved.variantId, variant_label: resolved.variantLabel }
+      : {}),
     ...(resolved.llmReason !== undefined ? { reason: resolved.llmReason } : {}),
     overridden: resolved.overridden,
     ...(resolved.overrideReason ? { override_reason: resolved.overrideReason } : {}),
@@ -242,9 +263,9 @@ async function recordRationale(
 
 /** Asks the model to pick one product from the full candidate list (in stock
  * or not — the guardrail below is what actually enforces stock/price, not
- * the prompt) and return `{chosen_sku, reason}`. Returns `undefined` on any
- * malformed or missing response; callers must always fall back rather than
- * trust an unparsed pick. */
+ * the prompt) and return `{chosen_sku, reason}`, plus `chosen_variant_id` when
+ * the goal named a size/color. Returns `undefined` on any malformed or missing
+ * response; callers must always fall back rather than trust an unparsed pick. */
 async function askLlm(
   chat: ChatClient,
   goal: ChooseProductGoal,
@@ -252,7 +273,12 @@ async function askLlm(
 ): Promise<LlmPick | undefined> {
   const { system, user } = buildPrompt(goal, candidates)
   const pick = await chat.chatJson({ system, user })
-  return pick.chosen_sku ? { chosen_sku: pick.chosen_sku, reason: pick.reason ?? '' } : undefined
+  if (!pick.chosen_sku) return undefined
+  return {
+    chosen_sku: pick.chosen_sku,
+    reason: pick.reason ?? '',
+    ...(pick.chosen_variant_id ? { chosen_variant_id: pick.chosen_variant_id } : {}),
+  }
 }
 
 /** Cap candidates sent to the LLM so a large real-store catalog (e.g. 200+
@@ -272,18 +298,33 @@ function buildPrompt(
   })
   // Title + price + brand only — descriptions balloon the prompt ~2x and blow
   // the free-tier token limit; title/brand carry enough signal to pick by goal.
+  // `variants` is included only when the product actually has size/color choices,
+  // so a single-SKU listing's prompt entry stays exactly as small as before.
   const listing = ranked.slice(0, MAX_LLM_CANDIDATES).map((p) => ({
     id: p.id,
     title: p.title,
     price_paise: p.price_paise,
     availability: p.availability.status,
     brand: p.brand,
+    ...(p.variants
+      ? {
+          variants: p.variants.map((v) => ({
+            variant_id: v.variant_id,
+            label: v.label,
+            available: v.available,
+          })),
+        }
+      : {}),
   }))
   const system =
     'You are a careful shopping assistant. Pick the single best-fitting product for the ' +
     "shopper's stated goal from a JSON candidate list. Respond with ONLY a JSON object of " +
-    'the shape {"chosen_sku": string, "reason": string} — no markdown, no other text. ' +
-    '"reason" is one sentence explaining the fit.'
+    'the shape {"chosen_sku": string, "reason": string, "chosen_variant_id": string} — no ' +
+    'markdown, no other text. "reason" is one sentence explaining the fit. If the goal names a ' +
+    'size or color, the chosen product has a "variants" list, and one of its variants matches, ' +
+    'set "chosen_variant_id" to that variant\'s id. Omit "chosen_variant_id" entirely when the ' +
+    'goal names no size/color, or when the chosen product has no "variants" list at all — never ' +
+    'invent a variant id that isn\'t in the candidate\'s own "variants" list.'
   const user = [
     `Shopper goal: "${goal.query}"`,
     `Maximum budget: ${goal.ceiling_paise} paise.`,
@@ -325,6 +366,36 @@ function resolveChoice(
   if (chosen.price_paise > goal.ceiling_paise) {
     return override('OVER_CEILING', candidates, goal, log, pick)
   }
+
+  if (pick.chosen_variant_id) {
+    const variant = chosen.variants?.find((v) => v.variant_id === pick.chosen_variant_id)
+    if (!variant) {
+      // Deliberately NOT `override(...)`: that helper substitutes a *different*
+      // product via fallbackPick, which would silently sell the shopper the wrong
+      // size's worth of a product they didn't ask for. A named-but-nonexistent
+      // variant is disclosed (overridden:true, override_reason) with no product at
+      // all, so the caller treats it as a blocked pick rather than a substitution.
+      log('guardrail_override', {
+        reason: 'VARIANT_NOT_FOUND',
+        llm_chosen_sku: pick.chosen_sku,
+        llm_chosen_variant_id: pick.chosen_variant_id,
+      })
+      return {
+        product: undefined,
+        overridden: true,
+        overrideReason: 'VARIANT_NOT_FOUND',
+        llmReason: pick.reason,
+      }
+    }
+    return {
+      product: chosen,
+      overridden: false,
+      llmReason: pick.reason,
+      variantId: variant.variant_id,
+      variantLabel: variant.label,
+    }
+  }
+
   return { product: chosen, overridden: false, llmReason: pick.reason }
 }
 

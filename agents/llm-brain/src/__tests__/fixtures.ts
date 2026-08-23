@@ -10,6 +10,7 @@ import type {
   Availability,
   BuyerTools,
   CartDraft,
+  CartLineInput,
   Product,
   SettlementResult,
 } from '../../../scripted-brain/src/agent-tools.js'
@@ -55,7 +56,11 @@ export function makeMandate(): PurchaseMandate {
 /** Returns a fake ChatClient whose single `chatJson` call always resolves to
  * `pick` — enough to exercise `askLlm`'s consumption of the client without
  * ever reaching the network. */
-export function fakeChat(pick: { chosen_sku?: string; reason?: string }): ChatClient {
+export function fakeChat(pick: {
+  chosen_sku?: string
+  reason?: string
+  chosen_variant_id?: string
+}): ChatClient {
   return {
     async chatJson() {
       return pick
@@ -71,7 +76,7 @@ export function pickOf(
 }
 
 export class FakeBuyerTools implements BuyerTools {
-  readonly proposeCartCalls: Array<ReadonlyArray<{ product: Product; qty: number }>> = []
+  readonly proposeCartCalls: Array<ReadonlyArray<CartLineInput>> = []
   readonly requestPaymentCalls: Array<{
     intent: IntentMandate
     cart: CartDraft
@@ -98,7 +103,7 @@ export class FakeBuyerTools implements BuyerTools {
     return product
   }
 
-  proposeCart(items: ReadonlyArray<{ product: Product; qty: number }>): CartDraft {
+  proposeCart(items: ReadonlyArray<CartLineInput>): CartDraft {
     this.proposeCartCalls.push(items)
     return buildCartDraft(items)
   }

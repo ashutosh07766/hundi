@@ -142,3 +142,80 @@ describe('chooseProduct — guardrail fallback', () => {
     expect(overrides).toEqual([{ reason: 'SKU_NOT_IN_CANDIDATES', llm_chosen_sku: 'sku-missing' }])
   })
 })
+
+describe('chooseProduct — variant resolution', () => {
+  const shoes = makeProduct({
+    id: 'shoes-1',
+    title: 'Active Walking Shoes',
+    price_paise: 320_000,
+    variants: [
+      {
+        variant_id: 'v-9',
+        label: '9',
+        option_values: ['9'],
+        price_paise: 300_000,
+        available: true,
+      },
+      {
+        variant_id: 'v-11',
+        label: '11',
+        option_values: ['11'],
+        price_paise: 320_000,
+        available: true,
+      },
+    ],
+  })
+
+  it('resolves chosen_variant_id to the matching variant and returns its id/label', async () => {
+    const chat = fakeChat({ chosen_sku: 'shoes-1', chosen_variant_id: 'v-11', reason: 'size 11' })
+
+    const result = await chooseProduct({ candidates: [shoes], goal: GOAL, chat })
+
+    expect(result).toEqual({
+      product: shoes,
+      chosen_sku: 'shoes-1',
+      chosen_variant_id: 'v-11',
+      variant_label: '11',
+      reason: 'size 11',
+      overridden: false,
+    })
+  })
+
+  it('never falls back to a substitute product when chosen_variant_id does not exist on the chosen product', async () => {
+    const otherCheap = makeProduct({ id: 'sku-cheap', price_paise: 50_000 })
+    const chat = fakeChat({
+      chosen_sku: 'shoes-1',
+      chosen_variant_id: 'v-13',
+      reason: 'size 13',
+    })
+
+    const result = await chooseProduct({ candidates: [shoes, otherCheap], goal: GOAL, chat })
+
+    // Fails loud: no product at all, not a silently-substituted cheaper one.
+    expect(result.product).toBeUndefined()
+    expect(result.chosen_sku).toBeUndefined()
+    expect(result.overridden).toBe(true)
+    expect(result.override_reason).toBe('VARIANT_NOT_FOUND')
+  })
+
+  it('resolves normally (no variant fields) when the model omits chosen_variant_id', async () => {
+    const chat = fakeChat(pickOf('shoes-1', 'good fit'))
+
+    const result = await chooseProduct({ candidates: [shoes], goal: GOAL, chat })
+
+    expect(result.product).toEqual(shoes)
+    expect(result.chosen_variant_id).toBeUndefined()
+    expect(result.variant_label).toBeUndefined()
+    expect(result.overridden).toBe(false)
+  })
+
+  it('reports VARIANT_NOT_FOUND when a variant id is requested on a product with no variants at all', async () => {
+    const singleSku = makeProduct({ id: 'sku-solo', price_paise: 100_000 })
+    const chat = fakeChat({ chosen_sku: 'sku-solo', chosen_variant_id: 'v-1', reason: 'only one' })
+
+    const result = await chooseProduct({ candidates: [singleSku], goal: GOAL, chat })
+
+    expect(result.product).toBeUndefined()
+    expect(result.override_reason).toBe('VARIANT_NOT_FOUND')
+  })
+})

@@ -43,6 +43,14 @@ export type CreateSettlementCall = {
   idempotencyKey: string | null
 }
 
+export type ProposeMandateCall = {
+  merchant_id: string
+  goal: string
+  ceiling_paise: number
+  approval_threshold_paise: number
+  agent_pubkey_hex: string
+}
+
 export type FakeFacilitatorState = {
   stores?: { merchant_id: string; name: string; product_count: number; source_url?: string }[]
   catalogs?: Record<string, Product[]>
@@ -53,12 +61,17 @@ export type FakeFacilitatorState = {
   onCreateSettlement?: (call: CreateSettlementCall) => { status: number; body: unknown }
   /** Every intercepted POST /settlements call, in order — assert against this. */
   createSettlementCalls: CreateSettlementCall[]
+  /** Called on every POST /mandates/propose; return `undefined` to fall back to a default
+   * `{ ok: true, proposal_id: 'proposal-1', approve_url: 'http://localhost:5173/?propose=proposal-1' }` 201. */
+  onProposeMandate?: (call: ProposeMandateCall) => { status: number; body: unknown }
+  /** Every intercepted POST /mandates/propose call, in order — assert against this. */
+  proposeMandateCalls: ProposeMandateCall[]
 }
 
 export function makeFakeFacilitatorState(
-  overrides: Omit<FakeFacilitatorState, 'createSettlementCalls'> = {},
+  overrides: Omit<FakeFacilitatorState, 'createSettlementCalls' | 'proposeMandateCalls'> = {},
 ): FakeFacilitatorState {
-  return { ...overrides, createSettlementCalls: [] }
+  return { ...overrides, createSettlementCalls: [], proposeMandateCalls: [] }
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -101,6 +114,20 @@ export function fakeFacilitatorFetch(state: FakeFacilitatorState): typeof fetch 
       const outcome = state.onCreateSettlement?.(call) ?? {
         status: 202,
         body: { ok: true, settlement_id: 'settlement-1', state: 'approved' },
+      }
+      return jsonResponse(outcome.body, outcome.status)
+    }
+
+    if (method === 'POST' && pathname === '/mandates/propose') {
+      const call = JSON.parse(String(init?.body)) as ProposeMandateCall
+      state.proposeMandateCalls.push(call)
+      const outcome = state.onProposeMandate?.(call) ?? {
+        status: 201,
+        body: {
+          ok: true,
+          proposal_id: 'proposal-1',
+          approve_url: 'http://localhost:5173/?propose=proposal-1',
+        },
       }
       return jsonResponse(outcome.body, outcome.status)
     }

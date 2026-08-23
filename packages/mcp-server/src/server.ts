@@ -20,6 +20,7 @@ import { registerGetAgentIdentityTool } from './tools/get-agent-identity.js'
 import { registerGetOrderTool } from './tools/get-order.js'
 import { registerGetStoreInfoTool } from './tools/get-store-info.js'
 import { registerListStoresTool } from './tools/list-stores.js'
+import { registerPrepareMandateTool } from './tools/prepare-mandate.js'
 import { registerRequestPurchaseTool } from './tools/request-purchase.js'
 import { registerSearchProductsTool } from './tools/search-products.js'
 
@@ -34,10 +35,13 @@ const SERVER_INSTRUCTIONS =
   "the Hundi facilitator's deterministic mandate checks (spending ceiling, merchant scope, " +
   'expiry, revocation, exact price match against the live catalog) before any money moves, and a ' +
   "purchase above the mandate's auto-approval threshold is parked for a human to approve in the " +
-  'Hundi dashboard. This server cannot approve a mandate, revoke a mandate, issue a refund, or ' +
-  'call a payment provider directly — those capabilities do not exist on any tool here. Start by ' +
-  "calling get_agent_identity to learn this agent's public key and see what it is already " +
-  'authorized to spend.'
+  'Hundi dashboard. When no mandate exists yet, call prepare_mandate to propose one from a plain-' +
+  'language request (e.g. "give yourself ₹5000 to shop Frido, no approvals") — it only stages an ' +
+  'inert draft and returns a link for the human to tap "Approve" on; this server cannot sign or ' +
+  'approve that draft itself. This server cannot approve a mandate, revoke a mandate, issue a ' +
+  'refund, or call a payment provider directly — those capabilities do not exist on any tool ' +
+  "here. Start by calling get_agent_identity to learn this agent's public key and see what it is " +
+  'already authorized to spend.'
 
 export type HundiServerDeps = {
   agent: AgentKeypair
@@ -74,6 +78,7 @@ export function createHundiMcpServer(deps: HundiServerDeps): McpServer {
   registerListStoresTool(server, { facilitatorClient })
   registerGetStoreInfoTool(server, { facilitatorClient })
   registerSearchProductsTool(server, { facilitatorClient })
+  registerPrepareMandateTool(server, { agent: deps.agent, facilitatorClient })
   registerRequestPurchaseTool(server, { agent: deps.agent, facilitatorClient, buyerTools })
   registerGetOrderTool(server, { facilitatorClient })
 

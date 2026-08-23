@@ -51,11 +51,28 @@ export type SettlementDetail = {
   ledger: LedgerEntry[]
 }
 
+export type ProposeMandateArgs = {
+  merchantId: string
+  goal: string
+  ceilingPaise: number
+  approvalThresholdPaise: number
+  agentPubkeyHex: string
+}
+
+export type ProposeMandateResult = {
+  proposalId: string
+  approveUrl: string
+}
+
 export type FacilitatorClient = {
   listStores(): Promise<StoreListItem[]>
   getCatalog(merchantId: string): Promise<Product[]>
   listMandates(): Promise<MandateRecord[]>
   getSettlement(settlementId: string): Promise<SettlementDetail | undefined>
+  /** POST /mandates/propose — stages an INERT draft, never a spendable mandate. Nothing
+   * this client signs; the facilitator route itself requires no auth token because a
+   * proposal binds no credential (see packages/facilitator/src/routes/mandate-proposals.ts). */
+  proposeMandate(args: ProposeMandateArgs): Promise<ProposeMandateResult>
 }
 
 type Envelope = { ok: boolean; error?: string; detail?: string }
@@ -117,6 +134,29 @@ export function createFacilitatorClient(facilitatorUrl: string): FacilitatorClie
         revoked: row.revoked_at !== null,
         createdAt: row.created_at,
       }))
+    },
+
+    async proposeMandate(args) {
+      const path = '/mandates/propose'
+      const res = await fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          merchant_id: args.merchantId,
+          goal: args.goal,
+          ceiling_paise: args.ceilingPaise,
+          approval_threshold_paise: args.approvalThresholdPaise,
+          agent_pubkey_hex: args.agentPubkeyHex,
+        }),
+      })
+      const body = (await parseJson(res, path)) as Envelope & {
+        proposal_id?: string
+        approve_url?: string
+      }
+      if (!res.ok || body.ok === false || !body.proposal_id || !body.approve_url) {
+        throw envelopeError(path, res, body)
+      }
+      return { proposalId: body.proposal_id, approveUrl: body.approve_url }
     },
 
     async getSettlement(settlementId) {

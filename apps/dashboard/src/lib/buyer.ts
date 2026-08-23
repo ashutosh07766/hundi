@@ -116,6 +116,57 @@ export function signCart(unsigned: UnsignedCart, agentKeyPair: AgentKeyPair): Ca
   return { ...unsigned, agent_sig_hex: sig.signature_hex }
 }
 
+/** POST /agent/select's response shape (packages/facilitator/src/routes/agent.ts) —
+ * a recommendation only, never a signed cart. `via` discloses how the pick was made:
+ * `'llm'` (the model reasoned over the goal), `'fallback'` (the model's pick failed
+ * validation server-side and the facilitator substituted cheapest-in-budget), or
+ * `'cheapest'` (no LLM configured at all). */
+type AgentSelectResponse =
+  | {
+      ok: true
+      chosen_sku: string
+      title: string
+      price_paise: number
+      merchant_id: string
+      reason: string
+      via: 'llm' | 'fallback' | 'cheapest'
+    }
+  | { ok: false; error: string }
+
+/** Asks the facilitator's /agent/select which catalog product best fits the mandate's
+ * goal. Returns `null` on any network/HTTP failure — never throws — so a down or
+ * misconfigured facilitator degrades `runTestPurchase` to its client-side cheapest
+ * pick instead of failing the button outright. This call never touches the agent key;
+ * it only reads a recommendation the caller is free to ignore. */
+async function fetchAgentSelect(
+  facilitatorUrl: string,
+  dashboardToken: string,
+  args: { merchant_id: string; goal: string; ceiling_paise: number },
+): Promise<AgentSelectResponse | null> {
+  try {
+    const res = await fetch(`${facilitatorUrl.replace(/\/$/, '')}/agent/select`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-hundi-dashboard-token': dashboardToken },
+      body: JSON.stringify(args),
+    })
+    if (!res.ok) return null
+    return (await res.json()) as AgentSelectResponse
+  } catch {
+    return null
+  }
+}
+
+/** Builds a `PickResult` around a specific sku the facilitator recommended, rather
+ * than re-deriving a pick from `pickProduct`'s cheapest rule. Mirrors `pickProduct`'s
+ * normal-mode branch exactly (merchant/price come from the listing's own real fields,
+ * never the recommendation payload) — the facilitator's advice only selects *which*
+ * sku to buy, it never supplies the price or merchant the cart is built from. */
+function pickFromSelection(products: readonly StoreProduct[], chosenSku: string): PickResult {
+  const product = products.find((p) => p.id === chosenSku)
+  if (!product) return { ok: false, reason: 'NO_CANDIDATE' }
+  return { ok: true, product, merchantId: product.merchant_id, unitPricePaise: product.price_paise }
+}
+
 async function fetchCatalog(
   facilitatorUrl: string,
   merchantId: string,
@@ -221,22 +272,31 @@ export type TestPurchaseResult = {
   reason?: string
   chosen?: { title: string; price_paise: number }
   paymentId?: string
+  /** How the product was chosen — omitted in poisoned mode, where selection always
+   * targets the injected attacker listing and an LLM opinion would be meaningless. */
+  selection?: { reason: string; via: 'llm' | 'fallback' | 'cheapest' }
 }
 
-/** Runs one end-to-end test-purchase attempt: fetch the mandate's merchant
- * catalog from the facilitator, pick a product (see `pickProduct`), sign a
+/** Runs one end-to-end test-purchase attempt: ask the facilitator's /agent/select
+ * which catalog product best fits the mandate's goal (see `fetchAgentSelect`), fetch
+ * the mandate's merchant catalog to resolve that pick's real price/merchant, sign a
  * cart with the agent key, submit it to the facilitator, and poll to a
  * terminal/pending state. The merchant shopped is `intent.merchants[0]` — the
  * mandate ceremony's store dropdown (see MandateCeremony.tsx) keeps that
  * array single-merchant for the common case, so there's no separate "which
  * store" input here to drift out of sync with what the mandate actually
  * authorizes. `onStep` is optional narration for an inline status line; the
- * function's behavior is identical whether or not a caller passes one. */
+ * function's behavior is identical whether or not a caller passes one.
+ *
+ * Poisoned mode never calls /agent/select — it always goes straight to
+ * `pickProduct`'s injected-payload branch, so "Run scam test" keeps targeting the
+ * attacker listing exactly as it did before this module could ask an LLM anything. */
 export async function runTestPurchase(args: {
   mandateId: string
   intent: IntentMandate
   agentKeyPair: AgentKeyPair
   facilitatorUrl: string
+  dashboardToken: string
   poisoned: boolean
   onStep?: (message: string) => void
 }): Promise<TestPurchaseResult> {
@@ -244,11 +304,40 @@ export async function runTestPurchase(args: {
   const merchantId = args.intent.merchants[0]
   if (!merchantId) return { ok: false, state: 'blocked', reason: 'NO_MERCHANT_IN_SCOPE' }
 
+  let selection: Extract<AgentSelectResponse, { ok: true }> | null = null
+  if (!args.poisoned) {
+    step('choosing…')
+    const selected = await fetchAgentSelect(args.facilitatorUrl, args.dashboardToken, {
+      merchant_id: merchantId,
+      goal: args.intent.goal,
+      ceiling_paise: args.intent.ceiling_paise,
+    })
+    // via:'cheapest' means no LLM is configured at all — treat that the same as a
+    // failed call and let the client-side cheapest-pick rule below run instead of
+    // trusting a recommendation that was never actually reasoned over.
+    if (selected?.ok && selected.via !== 'cheapest') selection = selected
+  }
+
   step('shopping…')
   const products = await fetchCatalog(args.facilitatorUrl, merchantId, args.poisoned)
-  const pick = pickProduct(products, args.intent, args.poisoned)
+  const pick = selection
+    ? pickFromSelection(products, selection.chosen_sku)
+    : pickProduct(products, args.intent, args.poisoned)
   if (!pick.ok) return { ok: false, state: 'blocked', reason: pick.reason }
-  step(`picked ${pick.product.title} at ${formatPaise(pick.unitPricePaise)}`)
+
+  // Poisoned mode never sets `selection` (the select call is skipped entirely — see
+  // above), so this always reads as the original neutral "picked X at ₹Y" for a scam
+  // test; only a real, non-poisoned run ever mentions the LLM.
+  const viaLabel =
+    selection?.via === 'llm'
+      ? '🧠 LLM picked'
+      : selection?.via === 'fallback'
+        ? '🧠 LLM pick unavailable, chose'
+        : args.poisoned
+          ? 'picked'
+          : 'picked cheapest (LLM off)'
+  const reasonSuffix = selection ? ` — "${selection.reason}"` : ''
+  step(`${viaLabel} ${pick.product.title} at ${formatPaise(pick.unitPricePaise)}${reasonSuffix}`)
 
   const unsigned = buildUnsignedCart(pick, args.intent)
   const cart = signCart(unsigned, args.agentKeyPair)
@@ -268,5 +357,6 @@ export async function runTestPurchase(args: {
     ...base,
     ...(final.reason === undefined ? {} : { reason: final.reason }),
     ...(paymentId === undefined ? {} : { paymentId }),
+    ...(selection ? { selection: { reason: selection.reason, via: selection.via } } : {}),
   }
 }

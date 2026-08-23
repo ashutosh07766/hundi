@@ -41,9 +41,10 @@ function describeOutcome(result: TestPurchaseResult): string {
   const chosen = result.chosen
     ? `${result.chosen.title} at ${formatPaise(result.chosen.price_paise)}`
     : null
-  if (result.state === 'captured') return `Captured${chosen ? ` — ${chosen}` : ''}`
+  const via = result.selection?.via === 'llm' ? ' (🧠 LLM pick)' : ''
+  if (result.state === 'captured') return `Captured${chosen ? ` — ${chosen}${via}` : ''}`
   if (result.state === 'pending_approval') {
-    return `Pending approval${chosen ? ` — ${chosen}` : ''} — go to Pending approvals to sign off`
+    return `Pending approval${chosen ? ` — ${chosen}${via}` : ''} — go to Pending approvals to sign off`
   }
   return `Blocked: ${result.reason ?? result.state}`
 }
@@ -57,7 +58,7 @@ function safeParseIntent(intentJson: string): IntentMandate | null {
 }
 
 export function MandatesList() {
-  const { humanSign } = useIdentity()
+  const { humanSign, dashboardToken } = useIdentity()
   const { data: mandates, error: pollError, loading } = usePolling(listMandates, 2000)
   const [statusById, setStatusById] = useState<Record<string, RowStatus>>({})
   const [purchaseById, setPurchaseById] = useState<Record<string, PurchaseStatus>>({})
@@ -86,6 +87,7 @@ export function MandatesList() {
         intent,
         agentKeyPair: agentKey,
         facilitatorUrl: FACILITATOR_URL,
+        dashboardToken,
         poisoned,
         onStep: (message) =>
           setPurchaseById((prev) => ({ ...prev, [mandateId]: { kind: 'busy', message } })),

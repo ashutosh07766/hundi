@@ -130,16 +130,31 @@ describe('buildUnsignedCart + signCart', () => {
 describe('runTestPurchase', () => {
   const originalFetch = globalThis.fetch
   const agentKeyPair = generateKeypair()
+  const DASHBOARD_TOKEN = 'dashboard-test-token'
 
   beforeEach(() => vi.restoreAllMocks())
   afterEach(() => {
     globalThis.fetch = originalFetch
   })
 
-  it('fetches the mandate merchant catalog from the facilitator, signs a cart with the agent key, and POSTs it with an Idempotency-Key', async () => {
+  it('asks /agent/select for a recommendation before shopping, and builds the cart around the returned sku — not necessarily the cheapest', async () => {
     const calls: Array<{ url: string; init: RequestInit | undefined }> = []
     const mockFetch = vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({ url, init })
+      if (url.endsWith('/agent/select')) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            chosen_sku: 'sku-002',
+            title: 'Velocity Air Runner Pro',
+            price_paise: 450_000,
+            merchant_id: 'demo-store-1',
+            reason: 'best match for the stated goal',
+            via: 'llm',
+          }),
+          { status: 200 },
+        )
+      }
       if (url.endsWith('/catalog/demo-store-1')) {
         return new Response(JSON.stringify(CATALOG), { status: 200 })
       }
@@ -158,17 +173,32 @@ describe('runTestPurchase', () => {
       intent: { ...INTENT, agent_pubkey_hex: agentKeyPair.publicKeyHex },
       agentKeyPair,
       facilitatorUrl: 'http://127.0.0.1:8790',
+      dashboardToken: DASHBOARD_TOKEN,
       poisoned: false,
     })
 
     expect(result).toEqual({
       ok: true,
       state: 'captured',
-      chosen: { title: 'Velocity Air Runner', price_paise: 320_000 },
+      chosen: { title: 'Velocity Air Runner Pro', price_paise: 450_000 },
       paymentId: 'settle-1',
+      selection: { reason: 'best match for the stated goal', via: 'llm' },
     })
 
-    expect(calls[0]?.url).toBe('http://127.0.0.1:8790/catalog/demo-store-1')
+    expect(calls[0]?.url).toBe('http://127.0.0.1:8790/agent/select')
+    const selectHeaders = calls[0]?.init?.headers as Record<string, string>
+    expect(selectHeaders['x-hundi-dashboard-token']).toBe(DASHBOARD_TOKEN)
+    const selectBody = JSON.parse(calls[0]?.init?.body as string) as {
+      merchant_id: string
+      goal: string
+      ceiling_paise: number
+    }
+    expect(selectBody).toEqual({
+      merchant_id: 'demo-store-1',
+      goal: 'Buy running shoes',
+      ceiling_paise: 400_000,
+    })
+
     const postCall = calls.find((c) => c.url === 'http://127.0.0.1:8790/settlements')
     expect(postCall).toBeDefined()
     expect(postCall?.init?.method).toBe('POST')
@@ -181,13 +211,90 @@ describe('runTestPurchase', () => {
     expect(body.intent.mandateId).toBe('mandate-1')
     expect(body.cart).toMatchObject({
       merchant_id: 'demo-store-1',
-      items: [{ sku: 'sku-001', qty: 1, unit_price_paise: 320_000 }],
-      total_paise: 320_000,
+      items: [{ sku: 'sku-002', qty: 1, unit_price_paise: 450_000 }],
+      total_paise: 450_000,
     })
   })
 
-  it('poisoned mode builds a cart pointing at the attacker merchant, and surfaces a facilitator block as ok:false', async () => {
+  it('falls back to the client-side cheapest pick when /agent/select errors', async () => {
+    const mockFetch = vi.fn(async (url: string) => {
+      if (url.endsWith('/agent/select')) return new Response('boom', { status: 500 })
+      if (url.endsWith('/catalog/demo-store-1')) {
+        return new Response(JSON.stringify(CATALOG), { status: 200 })
+      }
+      if (url.endsWith('/settlements')) {
+        return new Response(
+          JSON.stringify({ ok: true, settlement_id: 'settle-3', state: 'captured' }),
+          { status: 202 },
+        )
+      }
+      throw new Error(`unexpected fetch to ${url}`)
+    })
+    globalThis.fetch = mockFetch as unknown as typeof fetch
+
+    const result = await runTestPurchase({
+      mandateId: 'mandate-1',
+      intent: { ...INTENT, agent_pubkey_hex: agentKeyPair.publicKeyHex },
+      agentKeyPair,
+      facilitatorUrl: 'http://127.0.0.1:8790',
+      dashboardToken: DASHBOARD_TOKEN,
+      poisoned: false,
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      state: 'captured',
+      chosen: { title: 'Velocity Air Runner', price_paise: 320_000 },
+      paymentId: 'settle-3',
+    })
+  })
+
+  it('via:"cheapest" (no LLM configured) is treated the same as a failed select call — client-side pickProduct decides, not the endpoint\'s own sku', async () => {
+    const mockFetch = vi.fn(async (url: string) => {
+      if (url.endsWith('/agent/select')) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            chosen_sku: 'sku-004',
+            title: 'Velocity Featherlite',
+            price_paise: 350_000,
+            merchant_id: 'demo-store-1',
+            reason: 'LLM not configured; chose cheapest in budget',
+            via: 'cheapest',
+          }),
+          { status: 200 },
+        )
+      }
+      if (url.endsWith('/catalog/demo-store-1')) {
+        return new Response(JSON.stringify(CATALOG), { status: 200 })
+      }
+      if (url.endsWith('/settlements')) {
+        return new Response(
+          JSON.stringify({ ok: true, settlement_id: 'settle-4', state: 'captured' }),
+          { status: 202 },
+        )
+      }
+      throw new Error(`unexpected fetch to ${url}`)
+    })
+    globalThis.fetch = mockFetch as unknown as typeof fetch
+
+    const result = await runTestPurchase({
+      mandateId: 'mandate-1',
+      intent: { ...INTENT, agent_pubkey_hex: agentKeyPair.publicKeyHex },
+      agentKeyPair,
+      facilitatorUrl: 'http://127.0.0.1:8790',
+      dashboardToken: DASHBOARD_TOKEN,
+      poisoned: false,
+    })
+
+    expect(result.chosen).toEqual({ title: 'Velocity Air Runner', price_paise: 320_000 })
+    expect(result.selection).toBeUndefined()
+  })
+
+  it('poisoned mode never calls /agent/select, and builds a cart pointing at the attacker merchant — surfacing a facilitator block as ok:false', async () => {
     const mockFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/agent/select'))
+        throw new Error('poisoned mode must not call /agent/select')
       if (url.includes('/catalog/demo-store-1')) {
         expect(url).toContain('poisoned=1')
         return new Response(JSON.stringify([...CATALOG, POISONED_PRODUCT]), { status: 200 })
@@ -214,6 +321,7 @@ describe('runTestPurchase', () => {
       intent: { ...INTENT, agent_pubkey_hex: agentKeyPair.publicKeyHex },
       agentKeyPair,
       facilitatorUrl: 'http://127.0.0.1:8790',
+      dashboardToken: DASHBOARD_TOKEN,
       poisoned: true,
     })
 
@@ -224,6 +332,11 @@ describe('runTestPurchase', () => {
 
   it('reports a no-candidate outcome without ever calling the facilitator settlement endpoint', async () => {
     const mockFetch = vi.fn(async (url: string) => {
+      if (url.endsWith('/agent/select')) {
+        return new Response(JSON.stringify({ ok: false, error: 'NO_AFFORDABLE_PRODUCT' }), {
+          status: 200,
+        })
+      }
       if (url.endsWith('/catalog/demo-store-1')) {
         return new Response(JSON.stringify([]), { status: 200 })
       }
@@ -236,11 +349,12 @@ describe('runTestPurchase', () => {
       intent: INTENT,
       agentKeyPair,
       facilitatorUrl: 'http://127.0.0.1:8790',
+      dashboardToken: DASHBOARD_TOKEN,
       poisoned: false,
     })
 
     expect(result).toEqual({ ok: false, state: 'blocked', reason: 'NO_CANDIDATE' })
-    expect(mockFetch).toHaveBeenCalledTimes(1)
+    expect(mockFetch).toHaveBeenCalledTimes(2)
   })
 
   it('reports a clean block when the mandate has no merchant in scope, without calling fetch', async () => {
@@ -252,6 +366,7 @@ describe('runTestPurchase', () => {
       intent: { ...INTENT, merchants: [] },
       agentKeyPair,
       facilitatorUrl: 'http://127.0.0.1:8790',
+      dashboardToken: DASHBOARD_TOKEN,
       poisoned: false,
     })
 

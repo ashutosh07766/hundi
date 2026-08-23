@@ -36,16 +36,22 @@ Two signed documents, chained by hash:
 
 A mandate is only valid if it was **registered** with the facilitator
 through a ceremony gated by a server-issued, single-use token that only a
-human dashboard session can mint. `/verify` resolves the signing key from
-that registry, never from the request payload — otherwise any agent could
-mint itself a mandate with its own key and pass every check. An
-unregistered chain is rejected as `MANDATE_UNKNOWN`; a bare registration
-call without a ceremony token is rejected outright. Human approvals on
-above-threshold settlements go through the same registered-credential
-machinery: an approval is `{settlement_id, mandate_cart_hash, decision}`
-signed and verified the same way a mandate is, so the human's sign-off is a
-cryptographic artifact, not a button click an unauthenticated caller could
-also produce.
+human dashboard session can mint. The registered credential is the *human*
+key, distinct from the agent key the intent carries in `agent_pubkey_hex`.
+`/verify` resolves the intent signing key from that registry, never from the
+request payload — otherwise any agent could mint itself a mandate with its
+own key and pass every check. The cart, by contrast, is verified against the
+agent key the human-signed intent attests: the human vouches for the agent
+key by signing an intent that names it, and the agent — holding only that key
+— can build carts but nothing else. An unregistered chain is rejected as
+`MANDATE_UNKNOWN`; a bare registration call without a ceremony token is
+rejected outright. Human approvals on above-threshold settlements, and
+revocations, go through the registered-credential machinery: an approval is
+`{settlement_id, mandate_cart_hash, decision}` signed by the human key and
+verified the same way the intent is. Because the agent never holds the human
+key, it structurally cannot approve or revoke — the gate is a real second
+factor, not a button click an unauthenticated caller (or the agent itself)
+could also produce.
 
 **Signature envelope.** The verifier (`packages/core`) supports two
 signature types behind one interface: `ed25519` and `webauthn-es256`. Both

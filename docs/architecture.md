@@ -136,11 +136,18 @@ price, even when both are true. Every code below is a named branch in
 that function, each covered by its own test:
 
 `SCHEMA_INVALID` · `MANDATE_UNKNOWN` · `SIG_INVALID_INTENT` ·
-`HASH_LINK_MISMATCH` · `AGENT_KEY_MISMATCH` · `SIG_INVALID_CART` ·
+`HASH_LINK_MISMATCH` · `SIG_INVALID_CART` ·
 `LINE_ITEM_INVALID` · `PRICE_MISMATCH` · `CURRENCY_MISMATCH` ·
 `AMOUNT_EXCEEDS_CEILING` · `MERCHANT_NOT_IN_SCOPE` · `MANDATE_EXPIRED` ·
 `MANDATE_REVOKED` · `ALLOWANCE_RESERVED` · `ALLOWANCE_CONSUMED` ·
 `DUPLICATE_CART`
+
+`SIG_INVALID_CART` is where the two-key separation is enforced: the cart is
+verified against the agent key the (human-signed) intent attests
+(`agent_pubkey_hex`), never the registered human credential. The intent is
+verified against the registered human credential; approvals and revocations
+(route layer) are too. The agent holds only the cart key, so it can propose
+spending but cannot approve or revoke it.
 
 Three more codes live at the route layer, guarding the human-facing
 actions rather than the agent-facing cart gate: `APPROVAL_SIG_INVALID`

@@ -62,7 +62,10 @@ export function registerPrepareMandateTool(
           .optional()
           .describe(
             'Per-purchase line (in rupees) above which a human must approve in the dashboard ' +
-              'before it settles. Defaults to ceiling_rupees — i.e. no approvals, fully hands-free.',
+              'before it settles. Defaults to ceiling_rupees — i.e. no approvals, fully hands-free. ' +
+              'This only pauses an INDIVIDUAL purchase that exceeds it — it does not cap how much ' +
+              'can be spent hands-free in total: many separate purchases each under the threshold ' +
+              'can still exhaust the whole ceiling with zero approvals.',
           ),
       },
     },

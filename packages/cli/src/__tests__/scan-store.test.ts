@@ -232,5 +232,54 @@ describe('scanStore', () => {
       expect(result.products).toHaveLength(0)
       expect(result.warnings.some((w) => w.includes('products.json fallback'))).toBe(false)
     })
+
+    it('collapses a handle duplicated within a page AND across pages into exactly one merge warning', async () => {
+      function shopifyProduct(handle: string): Record<string, unknown> {
+        return {
+          handle,
+          title: `Title for ${handle}`,
+          vendor: 'Shop',
+          variants: [{ sku: `${handle}-v1`, price: '10.00', available: true }],
+        }
+      }
+
+      // 248 unique fillers + 2 "dup-x" entries = 250, exactly the page-size
+      // limit, so the scanner treats page 1 as full and fetches page 2 —
+      // the only way to exercise the cross-page dedupe pass in a test.
+      const page1Products = [
+        ...Array.from({ length: 248 }, (_, i) => shopifyProduct(`filler-${i}`)),
+        shopifyProduct('dup-x'),
+        shopifyProduct('dup-x'),
+      ]
+      const page2Products = [shopifyProduct('dup-x')]
+
+      const mockFetch = vi.fn(async (input: string | URL) => {
+        const url = input.toString()
+        if (url === 'https://shop.example.com/') {
+          return new Response(html('<p>No structured data here.</p>'), { status: 200 })
+        }
+        if (url.startsWith('https://shop.example.com/products.json?limit=250&page=1')) {
+          return shopifyPage(page1Products)
+        }
+        if (url.startsWith('https://shop.example.com/products.json?limit=250&page=2')) {
+          return shopifyPage(page2Products)
+        }
+        return new Response('not found', { status: 404 })
+      })
+      globalThis.fetch = mockFetch as unknown as typeof fetch
+
+      const result = await scanStore('https://shop.example.com/', { resolver: publicResolver })
+
+      // "dup-x" collapses twice over the course of the scan: once when page
+      // 1's own duplicate pair merges, and again when the cross-page pass
+      // folds page 1's already-merged entry into page 2's. Both merges
+      // produce byte-identical warning text — the log should still surface
+      // the collapse exactly once, not once per merge event.
+      const mergeWarnings = result.warnings.filter(
+        (w) => w.includes('merged duplicate') && w.includes('dup-x'),
+      )
+      expect(mergeWarnings).toHaveLength(1)
+      expect(result.products.filter((p) => p.sku === 'dup-x')).toHaveLength(1)
+    })
   })
 })

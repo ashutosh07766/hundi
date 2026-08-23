@@ -709,7 +709,22 @@ async function fetchShopifyProductsJson(
     }
 
     if (sawUsablePage && collected.length > 0) {
-      collected = dedupeShopifyProducts(collected, warnings)
+      // `dedupeShopifyProducts`'s warning text is keyed only on the handle
+      // (and, for exclusions, the base handle) — it carries no page/pass
+      // provenance. A handle already collapsed by a page's own dedupe pass
+      // above produces the identical string here if it also collides across
+      // pages, so cross-page warnings are filtered against what's already in
+      // `warnings` (and against each other) before appending, leaving each
+      // handle's collapse reported exactly once regardless of how many
+      // pages or passes it took to fully merge.
+      const crossPageWarnings: string[] = []
+      collected = dedupeShopifyProducts(collected, crossPageWarnings)
+      const alreadyReported = new Set(warnings)
+      for (const warning of crossPageWarnings) {
+        if (alreadyReported.has(warning)) continue
+        alreadyReported.add(warning)
+        warnings.push(warning)
+      }
       if (collected.length > 0) return collected.slice(0, SHOPIFY_PRODUCTS_JSON_MAX_PRODUCTS)
     }
   }

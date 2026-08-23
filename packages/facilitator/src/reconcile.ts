@@ -50,7 +50,6 @@ export type CaptureTarget = {
    * attempt state before calling this; applyCapture only moves live attempts. */
   attemptState: AttemptState
   settlementId: string
-  mandateId: string
   providerOrderId?: string
 }
 
@@ -283,7 +282,6 @@ async function reconcileCapturedPayment(
         attemptId: attempt.id,
         attemptState: attempt.state,
         settlementId: attempt.settlement_id,
-        mandateId: settlement.mandate_id,
         providerOrderId,
       },
       paymentId,

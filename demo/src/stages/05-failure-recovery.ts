@@ -129,7 +129,6 @@ export async function runStage5(h: DemoHarness): Promise<StageRun<Stage5Detail>>
       attemptId: linkAttempt.id,
       attemptState: 'awaiting_confirmation',
       settlementId,
-      mandateId: intent.mandateId,
     },
     linkPaymentId,
   )

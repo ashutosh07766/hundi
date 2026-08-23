@@ -3,6 +3,7 @@ import type { Hono } from 'hono'
 import type { AppDeps } from '../app.js'
 import { RouteError } from '../errors.js'
 import { verifyLedger } from '../ledger.js'
+import { getCapturedSpendByMandate } from '../mandate-repo.js'
 import { SETTLEMENT_TRANSITIONS } from '../state-machine.js'
 
 /** Every state the settlements.state CHECK constraint (db/schema.sql) allows —
@@ -83,15 +84,9 @@ export function registerReadRoutes(app: Hono, { db }: AppDeps): void {
       .all() as MandateListRow[]
 
     // Cumulative wallet: captured spend accrues against the mandate's ceiling.
-    // One grouped query for every mandate's captured total, joined in memory —
-    // cheaper than a correlated subquery per row and there are few mandates.
-    const spentRows = db
-      .prepare(
-        `SELECT mandate_id, COALESCE(SUM(amount_paise), 0) AS spent
-         FROM settlements WHERE state = 'captured' GROUP BY mandate_id`,
-      )
-      .all() as { mandate_id: string; spent: number }[]
-    const spentByMandate = new Map(spentRows.map((r) => [r.mandate_id, r.spent]))
+    // Same definition of "spent" the verify gate uses (getCapturedSpend), batched
+    // here so the display balance and the enforced balance can never drift.
+    const spentByMandate = getCapturedSpendByMandate(db)
 
     // Same 60s grace the verify gate applies to expiry, so "expired" here can't
     // disagree with what a settlement attempt would actually be rejected for.

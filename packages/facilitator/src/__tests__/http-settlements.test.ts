@@ -3,7 +3,7 @@ import { canonicalJson, sha256Hex } from '@hundi/core'
 import { describe, expect, it } from 'vitest'
 import { transitionSettlement } from '../state-machine.js'
 import { credentialFor, makeCart, makeIntent } from './fixtures.js'
-import { makeTestApp, postJson, registerMandate, TEST_ENV } from './http-helpers.js'
+import { getJson, makeTestApp, postJson, registerMandate, TEST_ENV } from './http-helpers.js'
 
 describe('POST /settlements — unregistered mandate', () => {
   it('rejects with MANDATE_UNKNOWN when the intent was never registered', async () => {
@@ -324,5 +324,83 @@ describe('POST /settlements — variant carts survive ingest', () => {
       variant_id: 'v-11uk',
       variant_label: 'Black / 11UK',
     })
+  })
+})
+
+describe('POST /settlements — cumulative wallet cap', () => {
+  it('measures prior captured spend against the ceiling, and a mandate stays active with budget left', async () => {
+    const { app, db } = makeTestApp()
+    // Ceiling ₹3,000; threshold high so nothing pauses for approval.
+    const { intent, agent } = makeIntent({
+      overrides: { ceiling_paise: 300_000, approval_threshold_paise: 300_000 },
+    })
+    await registerMandate(app, intent, credentialFor(agent))
+
+    const adminRes = await postJson(
+      app,
+      '/admin/merchants',
+      {
+        merchant_id: 'merchant-1',
+        name: 'Merchant One',
+        config: { catalogPrices: { 'sku-1': 100_000 } },
+      },
+      { 'x-hundi-admin-token': TEST_ENV.ADMIN_TOKEN },
+    )
+    expect(adminRes.status).toBe(201)
+
+    // ₹2,000 already captured under this mandate (spent 200_000, remaining 100_000).
+    db.prepare(
+      `INSERT INTO settlements (id, mandate_id, cart_json, mandate_cart_hash_hex, amount_paise, merchant_id, state)
+       VALUES ('prior-capture', ?, '{}', 'prior-hash', 200000, 'merchant-1', 'captured')`,
+    ).run(intent.mandateId)
+
+    // A ₹2,000 cart would push cumulative spend to 400_000 > ceiling → rejected.
+    // Posted first, while no settlement is live, so it reaches the budget check
+    // (a live settlement would instead trip one_live_settlement_per_mandate). A
+    // rejected settlement is terminal, so it holds no live lock afterward.
+    const overCart = makeCart({
+      agent,
+      intent,
+      items: [{ sku: 'sku-1', qty: 2, unit_price_paise: 100_000 }],
+      overrides: { cartId: 'over-cart' },
+    })
+    const overRes = await postJson(
+      app,
+      '/settlements',
+      { intent, cart: overCart },
+      { 'Idempotency-Key': 'idem-over' },
+    )
+    expect(overRes.status).toBe(202)
+    expect(await overRes.json()).toMatchObject({
+      ok: true,
+      state: 'rejected',
+      reason: 'AMOUNT_EXCEEDS_CEILING',
+    })
+
+    // A ₹1,000 cart fits exactly (200_000 + 100_000 = ceiling) → not rejected for budget.
+    const fitCart = makeCart({
+      agent,
+      intent,
+      items: [{ sku: 'sku-1', qty: 1, unit_price_paise: 100_000 }],
+      overrides: { cartId: 'fits-cart' },
+    })
+    const fitRes = await postJson(
+      app,
+      '/settlements',
+      { intent, cart: fitCart },
+      { 'Idempotency-Key': 'idem-fit' },
+    )
+    expect(fitRes.status).toBe(202)
+    expect(await fitRes.json()).not.toMatchObject({
+      state: 'rejected',
+      reason: 'AMOUNT_EXCEEDS_CEILING',
+    })
+
+    // The mandate is NOT consumed by the prior capture — still active, ₹1,000 left.
+    const listed = (await (await getJson(app, '/mandates')).json()) as {
+      mandates: { mandate_id: string; remaining_paise: number; state: string }[]
+    }
+    const row = listed.mandates.find((m) => m.mandate_id === intent.mandateId)
+    expect(row).toMatchObject({ remaining_paise: 100_000, state: 'active' })
   })
 })

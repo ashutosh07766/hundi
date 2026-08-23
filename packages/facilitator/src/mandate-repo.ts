@@ -44,3 +44,36 @@ export function encodeCredentialPublicKey(credential: Credential): string {
     ? credential.publicKey_hex
     : JSON.stringify(credential.publicKey_jwk)
 }
+
+/**
+ * Cumulative captured spend under one mandate, in paise — the single definition
+ * of "how much has this wallet spent". Both the verify gate (does this cart fit
+ * the remaining ceiling) and the read model (GET /mandates remaining_paise) go
+ * through here so the two can never drift; a drift is exactly what caused the
+ * false-balance bug the cumulative wallet was built to fix. Only `captured`
+ * settlements count — an in-flight one hasn't spent yet, and
+ * `one_live_settlement_per_mandate` keeps at most one in flight so this sum is
+ * stable for the life of the cart being verified.
+ */
+export function getCapturedSpend(db: Database.Database, mandateId: string): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(amount_paise), 0) AS spent FROM settlements
+       WHERE mandate_id = ? AND state = 'captured'`,
+    )
+    .get(mandateId) as { spent: number }
+  return row.spent
+}
+
+/** Batched form of {@link getCapturedSpend} for listing every mandate's spend in
+ * one query. Same definition of "spent" — a mandate absent from the map has no
+ * captured settlements, i.e. spend 0. */
+export function getCapturedSpendByMandate(db: Database.Database): Map<string, number> {
+  const rows = db
+    .prepare(
+      `SELECT mandate_id, COALESCE(SUM(amount_paise), 0) AS spent
+       FROM settlements WHERE state = 'captured' GROUP BY mandate_id`,
+    )
+    .all() as { mandate_id: string; spent: number }[]
+  return new Map(rows.map((r) => [r.mandate_id, r.spent]))
+}

@@ -9,7 +9,7 @@
 import type { CartMandate, IntentMandate, VerifyCtx } from '@hundi/core'
 import { canonicalJson, cartSigningBytes, intentSigningBytes, sha256Hex } from '@hundi/core'
 import type Database from 'better-sqlite3'
-import { credentialFromRow, getMandateRow } from './mandate-repo.js'
+import { credentialFromRow, getCapturedSpend, getMandateRow } from './mandate-repo.js'
 
 /**
  * Content-addressed identifier for one intent+cart pairing. Pure — computed
@@ -45,28 +45,14 @@ export function buildVerifyCtx(
   const credential = mandateRow ? credentialFromRow(mandateRow) : undefined
   const revoked = mandateRow?.revoked_at != null
 
-  let allowance: VerifyCtx['allowance'] = 'available'
-  if (mandateRow) {
-    const allowanceRow = db
-      .prepare('SELECT state FROM allowances WHERE mandate_id = ?')
-      .get(intent.mandateId) as { state: 'available' | 'reserved' | 'consumed' } | undefined
-    if (allowanceRow) allowance = allowanceRow.state
-  }
-
   // Cumulative wallet: the ceiling caps total captured spend across this mandate's
-  // lifetime, not one purchase. `spentPaise` is the sum of every already-captured
-  // settlement; verifyChain adds the current cart to it to enforce the cap. The
-  // current settlement is still non-terminal here (created/verifying/settling), so
-  // it never counts toward its own spent-so-far. `one_live_settlement_per_mandate`
-  // (schema.sql) keeps spends serialized, so this sum can't be raced by a
-  // concurrent capture between here and this cart's own capture.
-  const spentRow = db
-    .prepare(
-      `SELECT COALESCE(SUM(amount_paise), 0) AS spent FROM settlements
-       WHERE mandate_id = ? AND state = 'captured'`,
-    )
-    .get(intent.mandateId) as { spent: number }
-  const spentPaise = spentRow.spent
+  // lifetime, not one purchase. verifyChain adds the current cart to this and
+  // rejects AMOUNT_EXCEEDS_CEILING if the sum exceeds the ceiling. The current
+  // settlement is still non-terminal here (created/verifying/settling), so it
+  // never counts toward its own spent-so-far, and one_live_settlement_per_mandate
+  // (schema.sql) keeps spends serialized so this can't be raced by a concurrent
+  // capture. Shared with GET /mandates via getCapturedSpend so the two agree.
+  const spentPaise = getCapturedSpend(db, intent.mandateId)
 
   const mandateCartHashHex = computeMandateCartHash(intent, cart)
 
@@ -99,7 +85,6 @@ export function buildVerifyCtx(
   const ctx: VerifyCtx = {
     now,
     revoked,
-    allowance,
     spentPaise,
     duplicateCart,
     ...(credential ? { credential } : {}),

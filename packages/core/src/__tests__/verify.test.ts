@@ -11,7 +11,6 @@ function baseCtx(overrides: Partial<VerifyCtx> = {}): VerifyCtx {
   return {
     now: NOW,
     revoked: false,
-    allowance: 'available',
     duplicateCart: false,
     ...overrides,
   }
@@ -251,26 +250,20 @@ describe('verifyChain — one row per RejectionCode', () => {
     expect(result).toMatchObject({ ok: false, reason: 'MANDATE_REVOKED' })
   })
 
-  it('ALLOWANCE_RESERVED', () => {
-    const { intent, agent } = makeIntent()
+  it('reports MANDATE_REVOKED, not AMOUNT_EXCEEDS_CEILING, when a revoked mandate is also over budget', () => {
+    // Regression guard for the check-order fix: mandate liveness is checked
+    // before the cumulative budget, so a dead mandate says it's dead rather than
+    // reporting a budget error. Under the wallet, prior spend can trip the ceiling
+    // check for an otherwise-fine cart, which is what would surface the wrong
+    // code if the order were swapped back.
+    const { intent, agent } = makeIntent({ overrides: { ceiling_paise: 500_000 } })
     const cart = makeCart({ agent, intent })
     const result = verifyChain(
       intent,
       cart,
-      baseCtx({ credential: credentialFor(agent), allowance: 'reserved' }),
+      baseCtx({ credential: credentialFor(agent), revoked: true, spentPaise: 500_000 }),
     )
-    expect(result).toMatchObject({ ok: false, reason: 'ALLOWANCE_RESERVED' })
-  })
-
-  it('ALLOWANCE_CONSUMED', () => {
-    const { intent, agent } = makeIntent()
-    const cart = makeCart({ agent, intent })
-    const result = verifyChain(
-      intent,
-      cart,
-      baseCtx({ credential: credentialFor(agent), allowance: 'consumed' }),
-    )
-    expect(result).toMatchObject({ ok: false, reason: 'ALLOWANCE_CONSUMED' })
+    expect(result).toMatchObject({ ok: false, reason: 'MANDATE_REVOKED' })
   })
 
   it('DUPLICATE_CART', () => {

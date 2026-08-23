@@ -96,20 +96,37 @@ function variantHasAllValues(variant: ProductVariant, values: string[]): boolean
   return true
 }
 
-/** Free-text fallback for a single `variant` string like "11 / Black" — exact
- * label first, then substring on label or any option value. Only used when the
- * caller passes `variant` rather than structured `size`/`color`. */
-function findVariantByText(variants: ProductVariant[], needle: string): ProductVariant | undefined {
+type FreeTextMatch =
+  | { kind: 'found'; variant: ProductVariant }
+  | { kind: 'ambiguous'; matches: ProductVariant[] }
+  | { kind: 'none' }
+
+/** Free-text fallback for a single `variant` string like "11 / Black". An exact
+ * match (label or any option value equal to the needle) wins outright. Short of
+ * that, every substring match on label or option values is collected, and this
+ * only resolves when exactly one variant substring-matches — two or more must
+ * fail loud and list every match (the same discipline `resolveVariant` already
+ * applies to an ambiguous structured size/color) rather than silently taking
+ * whichever variant happens to come first in the array. Without this, a needle
+ * like "1" on a shoe sized 10UK/11UK/13UK would substring-match all three and
+ * silently resolve to the first one. Only used when the caller passes `variant`
+ * rather than structured `size`/`color`. */
+function findVariantByText(variants: ProductVariant[], needle: string): FreeTextMatch {
   const n = needle.trim().toLowerCase()
   const exact = variants.find(
     (v) => v.label.toLowerCase() === n || v.option_values.some((val) => val.toLowerCase() === n),
   )
-  if (exact) return exact
-  return variants.find(
+  if (exact) return { kind: 'found', variant: exact }
+
+  const substringMatches = variants.filter(
     (v) =>
       v.label.toLowerCase().includes(n) ||
       v.option_values.some((val) => val.toLowerCase().includes(n)),
   )
+  const only = substringMatches[0]
+  if (substringMatches.length === 1 && only) return { kind: 'found', variant: only }
+  if (substringMatches.length > 1) return { kind: 'ambiguous', matches: substringMatches }
+  return { kind: 'none' }
 }
 
 type VariantResolution = { ok: true; variant?: ProductVariant } | { ok: false; error: string }
@@ -181,9 +198,21 @@ function resolveVariant(
     }
   }
 
-  // Only a free-text `variant` string was given.
-  const match = args.variant ? findVariantByText(product.variants, args.variant) : undefined
-  if (match) return { ok: true, variant: match }
+  // Only a free-text `variant` string was given (args.variant is guaranteed
+  // non-empty here — see the `requestedSomething` check above).
+  const textMatch = args.variant
+    ? findVariantByText(product.variants, args.variant)
+    : ({ kind: 'none' } as const)
+  if (textMatch.kind === 'found') return { ok: true, variant: textMatch.variant }
+  if (textMatch.kind === 'ambiguous') {
+    return {
+      ok: false,
+      error:
+        `"${args.variant}" matches ${textMatch.matches.length} variants on "${product.title}" — ` +
+        `be more specific (pass structured size/color, or the exact label). Matching: ` +
+        `${describeVariants(textMatch.matches)}.`,
+    }
+  }
   return {
     ok: false,
     error:
@@ -390,6 +419,26 @@ export function registerRequestPurchaseTool(
             'threshold. A human must approve it in the Hundi dashboard — Pending approvals tab — ' +
             'before it will be charged. This tool will not check back on its own; call get_order ' +
             'with this settlement_id later to see whether it was approved.',
+        })
+      }
+
+      // A contested idempotency key (IN_FLIGHT: an earlier attempt under the same key
+      // hasn't finished deciding; KEY_REUSED: the same key arrived with a different
+      // body) means the facilitator never told us this attempt's outcome — an earlier
+      // attempt may still capture. This must never be reported as a terminal failure,
+      // and there is no settlement_id from THIS attempt to poll (the facilitator
+      // didn't create one for a rejected idempotency claim).
+      if (result.reason === 'IN_FLIGHT' || result.reason === 'KEY_REUSED') {
+        return jsonResult({
+          state: 'ambiguous',
+          settlement_id: null,
+          reason: result.reason,
+          message:
+            `Purchase outcome is ambiguous (${result.reason}) — an earlier attempt for this same ` +
+            'purchase may still be processing or may already have captured. Do NOT tell the user ' +
+            'nothing was charged, and do NOT retry with a new idempotency_token (that risks a ' +
+            'duplicate charge). If you have a settlement_id from an earlier response for this same ' +
+            'purchase, call get_order with it to check the real outcome before doing anything else.',
         })
       }
 

@@ -707,6 +707,96 @@ describe('request_purchase — variant resolution, max price, idempotency', () =
     )
   })
 
+  it('rejects an ambiguous free-text variant substring instead of silently picking the first match', async () => {
+    const { intent } = makeSignedIntent({ agent })
+    const state = capturedState(intent)
+    const { server } = buildServer(state, agent)
+    const client = await connectedClient(server)
+
+    // "1" substring-matches all three variants (11UK, 11UK, 10UK all contain "1") —
+    // must fail loud rather than silently settling on whichever comes first.
+    const result = await client.callTool({
+      name: 'request_purchase',
+      arguments: {
+        merchant_id: 'demo-store-1',
+        sku: 'sneaker',
+        qty: 1,
+        mandate_id: intent.mandateId,
+        variant: '1',
+      },
+    })
+    expect(result.isError).toBeFalsy()
+    const body = jsonOf<{ state: string; reason: string; message: string }>(result)
+    expect(body.state).toBe('rejected')
+    expect(body.reason).toBe('VARIANT_NOT_FOUND')
+    expect(body.message).toContain('3 variants')
+    expect(state.createSettlementCalls).toHaveLength(0)
+  })
+
+  it('reports a contested idempotency key (409 IN_FLIGHT) as ambiguous, never a terminal rejection', async () => {
+    const { intent } = makeSignedIntent({ agent })
+    const state = makeFakeFacilitatorState({
+      catalogs: { 'demo-store-1': [sneaker()] },
+      mandates: [mandateRow({ mandateId: intent.mandateId, intent })],
+      onCreateSettlement: () => ({
+        status: 409,
+        body: { ok: false, error: 'IN_FLIGHT' },
+      }),
+    })
+    const { server } = buildServer(state, agent)
+    const client = await connectedClient(server)
+
+    const result = await client.callTool({
+      name: 'request_purchase',
+      arguments: {
+        merchant_id: 'demo-store-1',
+        sku: 'sneaker',
+        qty: 1,
+        mandate_id: intent.mandateId,
+        variant_id: 'v-black-11',
+      },
+    })
+    expect(result.isError).toBeFalsy()
+    const body = jsonOf<{ state: string; reason: string; message: string }>(result)
+    expect(body.state).toBe('ambiguous')
+    expect(body.reason).toBe('IN_FLIGHT')
+    expect(body.message.toLowerCase()).toContain('get_order')
+    // Not the terminal wording used for an actual rejection/failure/abandonment —
+    // this state must read as unresolved, not as a confirmed non-charge.
+    expect(body.message).not.toContain('Not completed')
+    expect(state.createSettlementCalls).toHaveLength(1)
+  })
+
+  it('reports a contested idempotency key (409 KEY_REUSED) as ambiguous, never a terminal rejection', async () => {
+    const { intent } = makeSignedIntent({ agent })
+    const state = makeFakeFacilitatorState({
+      catalogs: { 'demo-store-1': [sneaker()] },
+      mandates: [mandateRow({ mandateId: intent.mandateId, intent })],
+      onCreateSettlement: () => ({
+        status: 409,
+        body: { ok: false, error: 'KEY_REUSED' },
+      }),
+    })
+    const { server } = buildServer(state, agent)
+    const client = await connectedClient(server)
+
+    const result = await client.callTool({
+      name: 'request_purchase',
+      arguments: {
+        merchant_id: 'demo-store-1',
+        sku: 'sneaker',
+        qty: 1,
+        mandate_id: intent.mandateId,
+        variant_id: 'v-black-11',
+        idempotency_token: 'attempt-conflict',
+      },
+    })
+    expect(result.isError).toBeFalsy()
+    const body = jsonOf<{ state: string; reason: string }>(result)
+    expect(body.state).toBe('ambiguous')
+    expect(body.reason).toBe('KEY_REUSED')
+  })
+
   it('makes the token key price-independent, so a retry after a catalog price move still dedupes', async () => {
     const { intent } = makeSignedIntent({ agent })
     const state = capturedState(intent)

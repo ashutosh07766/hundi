@@ -323,7 +323,6 @@ async function runAttemptLoop(
           attemptId,
           attemptState: 'initiated',
           settlementId,
-          mandateId: settlement.mandate_id,
           providerOrderId,
         },
         driverResult.paymentId,

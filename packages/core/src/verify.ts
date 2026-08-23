@@ -32,8 +32,12 @@ export type RejectionCode =
   | 'MANDATE_EXPIRED'
   | 'MANDATE_REVOKED'
   | 'AMOUNT_EXCEEDS_CEILING'
+  // Not produced by verifyChain. Emitted by the facilitator's settlement service
+  // when the one_live_settlement_per_mandate index rejects a second concurrent
+  // live settlement — i.e. a purchase is already in flight for this mandate. Kept
+  // in this shared code because that route reports it, not because a mandate
+  // carries a reserved/consumed allowance state (the cumulative wallet has none).
   | 'ALLOWANCE_RESERVED'
-  | 'ALLOWANCE_CONSUMED'
   | 'DUPLICATE_CART'
 
 export type VerifyCtx = {
@@ -48,7 +52,6 @@ export type VerifyCtx = {
    */
   credential?: Credential
   revoked: boolean
-  allowance: 'available' | 'reserved' | 'consumed'
   /**
    * Total already-captured spend under this mandate, in paise. The ceiling is a
    * cumulative wallet, so a cart is rejected AMOUNT_EXCEEDS_CEILING when
@@ -222,9 +225,6 @@ export function verifyChain(
       `cart ${cart.total_paise} + already-spent ${spentPaise} exceeds ceiling ${intent.ceiling_paise}`,
     )
   }
-
-  if (ctx.allowance === 'reserved') return fail('ALLOWANCE_RESERVED')
-  if (ctx.allowance === 'consumed') return fail('ALLOWANCE_CONSUMED')
 
   if (ctx.duplicateCart) return fail('DUPLICATE_CART')
 

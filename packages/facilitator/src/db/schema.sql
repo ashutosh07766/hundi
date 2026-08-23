@@ -11,13 +11,19 @@ CREATE TABLE IF NOT EXISTS mandates (
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
+-- Records a mandate's cumulative-wallet terms at registration. `state` is
+-- vestigial: under the cumulative wallet a mandate is never "consumed" by a
+-- single capture, so nothing ever writes anything but the default 'available'.
+-- Remaining budget is derived from captured settlements (see getCapturedSpend),
+-- and one_live_settlement_per_mandate — not an allowance state — serializes
+-- concurrent spends. The CHECK is narrowed to the only value the code produces.
 CREATE TABLE IF NOT EXISTS allowances (
   mandate_id TEXT PRIMARY KEY REFERENCES mandates(mandate_id),
   max_amount_paise INTEGER NOT NULL,
   currency TEXT NOT NULL DEFAULT 'INR',
   expires_at INTEGER NOT NULL,
-  reason TEXT NOT NULL DEFAULT 'one_time',
-  state TEXT NOT NULL DEFAULT 'available' CHECK(state IN ('available','reserved','consumed'))
+  reason TEXT NOT NULL DEFAULT 'cumulative',
+  state TEXT NOT NULL DEFAULT 'available' CHECK(state IN ('available'))
 );
 
 CREATE TABLE IF NOT EXISTS settlements (

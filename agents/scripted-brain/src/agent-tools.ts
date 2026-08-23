@@ -295,7 +295,20 @@ export class HttpBuyerTools implements BuyerTools {
     })
     const body = (await res.json()) as SettlementCreateBody
 
-    if (!body.ok) return settlementResult('', 'rejected', body.error)
+    if (!body.ok) {
+      // A 409 on the idempotency key itself is not a payment decision — IN_FLIGHT
+      // means an earlier attempt under this same key hasn't reached a terminal state
+      // yet (it may still capture); KEY_REUSED means the same key arrived with a
+      // different request body. Neither tells us the purchase failed, so it must not
+      // collapse into 'rejected' — a caller reading that state could tell a user
+      // "nothing was charged" while a charge is still pending. There is no
+      // settlement_id to report here (the facilitator never created one for this
+      // response); the caller gets the facilitator's code back as `reason` so it can
+      // route this differently from an actual rejection.
+      const idempotencyKeyContested =
+        res.status === 409 && (body.error === 'IN_FLIGHT' || body.error === 'KEY_REUSED')
+      return settlementResult('', idempotencyKeyContested ? 'created' : 'rejected', body.error)
+    }
     if (POLL_STOP_STATES.has(body.state))
       return settlementResult(body.settlement_id, body.state, body.reason)
     return this.pollSettlement(body.settlement_id)

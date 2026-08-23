@@ -36,7 +36,6 @@ describe('applyCapture', () => {
         attemptId,
         attemptState: 'initiated',
         settlementId,
-        mandateId,
         providerOrderId: 'order-direct',
       },
       'pay-direct',
@@ -67,7 +66,7 @@ describe('applyCapture', () => {
 
   it('returns false without throwing when the attempt already moved (stale CAS)', () => {
     const db = openTestDb()
-    const { settlementId, mandateId, attemptId } = makeSettlingAttempt(db, 'order-race')
+    const { settlementId, attemptId } = makeSettlingAttempt(db, 'order-race')
     // Simulate a concurrent writer already having captured this attempt.
     applyCapture(
       db,
@@ -75,7 +74,6 @@ describe('applyCapture', () => {
         attemptId,
         attemptState: 'initiated',
         settlementId,
-        mandateId,
         providerOrderId: 'order-race',
       },
       'pay-race',
@@ -87,7 +85,6 @@ describe('applyCapture', () => {
         attemptId,
         attemptState: 'initiated',
         settlementId,
-        mandateId,
         providerOrderId: 'order-race',
       },
       'pay-race-2',

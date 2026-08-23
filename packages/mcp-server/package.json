@@ -1,0 +1,29 @@
+{
+  "name": "@hundi/mcp-server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "hundi-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --platform node --target node22 --clean",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "start": "tsx src/index.ts",
+    "smoke": "tsx --env-file=../../.env bin/smoke-live.ts"
+  },
+  "dependencies": {
+    "@hundi/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.0",
+    "tsx": "^4.20.0",
+    "vitest": "^4.0.0"
+  }
+}

@@ -81,7 +81,44 @@ export function registerReadRoutes(app: Hono, { db }: AppDeps): void {
       )
       .all() as MandateListRow[]
 
-    return c.json({ ok: true, mandates }, 200)
+    // Cumulative wallet: captured spend accrues against the mandate's ceiling.
+    // One grouped query for every mandate's captured total, joined in memory —
+    // cheaper than a correlated subquery per row and there are few mandates.
+    const spentRows = db
+      .prepare(
+        `SELECT mandate_id, COALESCE(SUM(amount_paise), 0) AS spent
+         FROM settlements WHERE state = 'captured' GROUP BY mandate_id`,
+      )
+      .all() as { mandate_id: string; spent: number }[]
+    const spentByMandate = new Map(spentRows.map((r) => [r.mandate_id, r.spent]))
+
+    // Same 60s grace the verify gate applies to expiry, so "expired" here can't
+    // disagree with what a settlement attempt would actually be rejected for.
+    const now = Math.floor(Date.now() / 1000)
+    const CLOCK_SKEW_SEC = 60
+
+    const enriched = mandates.map((row) => {
+      const intent = JSON.parse(row.intent_json) as { ceiling_paise: number; expires_at: number }
+      const spentPaise = spentByMandate.get(row.mandate_id) ?? 0
+      const remainingPaise = Math.max(0, intent.ceiling_paise - spentPaise)
+      const state: 'active' | 'consumed' | 'expired' | 'revoked' =
+        row.revoked_at != null
+          ? 'revoked'
+          : now > intent.expires_at + CLOCK_SKEW_SEC
+            ? 'expired'
+            : remainingPaise <= 0
+              ? 'consumed'
+              : 'active'
+      return {
+        ...row,
+        ceiling_paise: intent.ceiling_paise,
+        spent_paise: spentPaise,
+        remaining_paise: remainingPaise,
+        state,
+      }
+    })
+
+    return c.json({ ok: true, mandates: enriched }, 200)
   })
 
   app.get('/ledger', (c) => {

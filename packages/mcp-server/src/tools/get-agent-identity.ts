@@ -10,6 +10,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { AgentKeypair } from '../../../../agents/scripted-brain/src/ed25519.js'
 import type { FacilitatorClient } from '../facilitator-client.js'
+import { formatRupees } from '../format.js'
 import { jsonResult } from '../tool-result.js'
 
 export function registerGetAgentIdentityTool(
@@ -27,7 +28,11 @@ export function registerGetAgentIdentityTool(
         'server can only spend under a mandate whose agent_pubkey_hex matches this key, and it ' +
         "structurally cannot approve or revoke a mandate — those actions require the human's own, " +
         'separate key and happen only in the dashboard. Also lists mandates currently authorizing ' +
-        "this key, so you can see what you're already allowed to spend before proposing a purchase.",
+        "this key with each one's authoritative wallet accounting — spent_paise, remaining_paise, " +
+        'and state (active | consumed | expired | revoked). A mandate is a cumulative wallet: it ' +
+        'stays spendable across multiple purchases until remaining_paise hits zero (state ' +
+        'consumed) or it expires. Read remaining_paise/state directly — do not compute a balance ' +
+        'by subtracting past purchases yourself.',
       inputSchema: {},
     },
     async () => {
@@ -49,6 +54,14 @@ export function registerGetAgentIdentityTool(
           goal: m.intent.goal,
           ceiling_paise: m.intent.ceiling_paise,
           approval_threshold_paise: m.intent.approval_threshold_paise,
+          // Authoritative wallet accounting straight from the facilitator — report
+          // `remaining_paise`/`state`, never a balance derived by subtracting here.
+          // A mandate is a cumulative wallet: `state: consumed` means it's drained,
+          // `remaining_paise` is what's left to spend before it is.
+          spent_paise: m.spentPaise,
+          remaining_paise: m.remainingPaise,
+          remaining_display: formatRupees(m.remainingPaise),
+          state: m.state,
           merchants: m.intent.merchants,
           expires_at: m.intent.expires_at,
           revoked: m.revoked,

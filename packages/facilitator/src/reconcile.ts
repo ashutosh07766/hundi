@@ -57,11 +57,19 @@ export type CaptureTarget = {
 /**
  * Drives one attempt + its settlement to `captured` inside a single
  * transaction: attempt -> captured, settlement `settling` -> captured,
- * allowance -> consumed, ledger `payment_captured`. The only writer of the
+ * ledger `payment_captured`. The only writer of the
  * `captured` attempt state — both the executor's own happy-path confirmation
  * and reconcile's catch-up path funnel through here, so `one_captured_attempt`
  * (schema.sql) only ever has to reject a genuine race, never a code-path
  * inconsistency.
+ *
+ * A capture does NOT close the mandate: the ceiling is a cumulative wallet, not
+ * a single-use allowance, so a mandate stays spendable until its captured spend
+ * reaches the ceiling or it expires. Remaining budget is derived at verify time
+ * from the sum of captured settlements (see verify-logic.ts), so there is no
+ * allowance state to flip here — the terminal `captured` settlement itself is
+ * the record of the debit, and `one_live_settlement_per_mandate` (schema.sql)
+ * keeps spends serialized so cumulative-cap enforcement can't be raced.
  *
  * Returns false (never throws on a stale CAS) when a concurrent writer moved
  * the attempt or settlement out from under this call between the caller's
@@ -89,9 +97,6 @@ export function applyCapture(
       if (err instanceof StaleTransition) return false
       throw err
     }
-    db.prepare(`UPDATE allowances SET state = 'consumed' WHERE mandate_id = ?`).run(
-      target.mandateId,
-    )
     appendLedger(db, {
       event_type: 'payment_captured',
       settlement_id: target.settlementId,

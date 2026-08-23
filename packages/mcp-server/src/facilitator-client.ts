@@ -23,6 +23,12 @@ export type MandateRecord = {
   intent: IntentMandate
   revoked: boolean
   createdAt: number
+  /** Cumulative wallet accounting from the facilitator — the source of truth for
+   * "how much is left", so a client never computes a remaining balance by
+   * subtraction (which silently drifts the moment the spend model changes). */
+  spentPaise: number
+  remainingPaise: number
+  state: 'active' | 'consumed' | 'expired' | 'revoked'
 }
 
 export type SettlementAttempt = {
@@ -126,6 +132,9 @@ export function createFacilitatorClient(facilitatorUrl: string): FacilitatorClie
         intent_json: string
         revoked_at: number | null
         created_at: number
+        spent_paise: number
+        remaining_paise: number
+        state: 'active' | 'consumed' | 'expired' | 'revoked'
       }
       const { mandates } = await getEnvelope<{ ok: true; mandates: Row[] }>('/mandates')
       return mandates.map((row) => ({
@@ -133,6 +142,9 @@ export function createFacilitatorClient(facilitatorUrl: string): FacilitatorClie
         intent: JSON.parse(row.intent_json) as IntentMandate,
         revoked: row.revoked_at !== null,
         createdAt: row.created_at,
+        spentPaise: row.spent_paise,
+        remainingPaise: row.remaining_paise,
+        state: row.state,
       }))
     },
 

@@ -53,6 +53,21 @@ export function buildVerifyCtx(
     if (allowanceRow) allowance = allowanceRow.state
   }
 
+  // Cumulative wallet: the ceiling caps total captured spend across this mandate's
+  // lifetime, not one purchase. `spentPaise` is the sum of every already-captured
+  // settlement; verifyChain adds the current cart to it to enforce the cap. The
+  // current settlement is still non-terminal here (created/verifying/settling), so
+  // it never counts toward its own spent-so-far. `one_live_settlement_per_mandate`
+  // (schema.sql) keeps spends serialized, so this sum can't be raced by a
+  // concurrent capture between here and this cart's own capture.
+  const spentRow = db
+    .prepare(
+      `SELECT COALESCE(SUM(amount_paise), 0) AS spent FROM settlements
+       WHERE mandate_id = ? AND state = 'captured'`,
+    )
+    .get(intent.mandateId) as { spent: number }
+  const spentPaise = spentRow.spent
+
   const mandateCartHashHex = computeMandateCartHash(intent, cart)
 
   const dupRow = opts.excludeSettlementId
@@ -85,6 +100,7 @@ export function buildVerifyCtx(
     now,
     revoked,
     allowance,
+    spentPaise,
     duplicateCart,
     ...(credential ? { credential } : {}),
     ...(catalogPrices ? { catalogPrices } : {}),

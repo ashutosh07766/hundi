@@ -197,6 +197,31 @@ describe('verifyChain — one row per RejectionCode', () => {
     expect(result).toMatchObject({ ok: false, reason: 'AMOUNT_EXCEEDS_CEILING' })
   })
 
+  it('cumulative wallet: prior spend that pushes cart over the ceiling is AMOUNT_EXCEEDS_CEILING', () => {
+    // ceiling 500_000, default cart total 200_000, already spent 400_000 →
+    // 600_000 > 500_000. The single cart fits the ceiling; the cumulative total doesn't.
+    const { intent, agent } = makeIntent({ overrides: { ceiling_paise: 500_000 } })
+    const cart = makeCart({ agent, intent })
+    const result = verifyChain(
+      intent,
+      cart,
+      baseCtx({ credential: credentialFor(agent), spentPaise: 400_000 }),
+    )
+    expect(result).toMatchObject({ ok: false, reason: 'AMOUNT_EXCEEDS_CEILING' })
+  })
+
+  it('cumulative wallet: a mandate with prior spend still passes while cumulative total is within the ceiling', () => {
+    // 200_000 already spent + 200_000 this cart = 400_000 ≤ 500_000 → reusable.
+    const { intent, agent } = makeIntent({ overrides: { ceiling_paise: 500_000 } })
+    const cart = makeCart({ agent, intent })
+    const result = verifyChain(
+      intent,
+      cart,
+      baseCtx({ credential: credentialFor(agent), spentPaise: 200_000 }),
+    )
+    expect(result.ok).toBe(true)
+  })
+
   it('MERCHANT_NOT_IN_SCOPE: cart merchant not listed on the intent', () => {
     const { intent, agent } = makeIntent()
     const cart = makeCart({ agent, intent, overrides: { merchant_id: 'someone-else' } })

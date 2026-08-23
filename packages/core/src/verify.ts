@@ -28,10 +28,10 @@ export type RejectionCode =
   | 'LINE_ITEM_INVALID'
   | 'PRICE_MISMATCH'
   | 'CURRENCY_MISMATCH'
-  | 'AMOUNT_EXCEEDS_CEILING'
   | 'MERCHANT_NOT_IN_SCOPE'
   | 'MANDATE_EXPIRED'
   | 'MANDATE_REVOKED'
+  | 'AMOUNT_EXCEEDS_CEILING'
   | 'ALLOWANCE_RESERVED'
   | 'ALLOWANCE_CONSUMED'
   | 'DUPLICATE_CART'
@@ -49,6 +49,14 @@ export type VerifyCtx = {
   credential?: Credential
   revoked: boolean
   allowance: 'available' | 'reserved' | 'consumed'
+  /**
+   * Total already-captured spend under this mandate, in paise. The ceiling is a
+   * cumulative wallet, so a cart is rejected AMOUNT_EXCEEDS_CEILING when
+   * `spentPaise + cart.total_paise` exceeds `ceiling_paise`, not when the single
+   * cart does. Defaults to 0 (a mandate with no prior captures), which reduces to
+   * the original per-cart check for the first purchase.
+   */
+  spentPaise?: number
   catalogPrices?: Record<string, number>
   duplicateCart: boolean
   /** Unix-seconds grace window applied to `expires_at`. Default 60. */
@@ -193,14 +201,27 @@ export function verifyChain(
 
   if (intent.currency !== 'INR') return fail('CURRENCY_MISMATCH')
 
-  if (cart.total_paise > intent.ceiling_paise) return fail('AMOUNT_EXCEEDS_CEILING')
-
   if (!intent.merchants.includes(cart.merchant_id)) return fail('MERCHANT_NOT_IN_SCOPE')
 
   const skew = ctx.clockSkewSec ?? 60
   if (ctx.now > intent.expires_at + skew) return fail('MANDATE_EXPIRED')
 
   if (ctx.revoked) return fail('MANDATE_REVOKED')
+
+  // Budget comes after mandate-liveness (expiry/revocation) and scope: those say
+  // the mandate is dead or the cart is out of scope, which is more fundamental
+  // than "this would exceed budget" — a revoked mandate must report REVOKED, not
+  // a budget error, even when it's also over budget. Cumulative wallet: the
+  // ceiling caps total captured spend, so this cart is measured against what's
+  // already been spent, not in isolation. spentPaise defaults to 0 (no prior
+  // captures), collapsing to a plain per-cart check for the first purchase.
+  const spentPaise = ctx.spentPaise ?? 0
+  if (spentPaise + cart.total_paise > intent.ceiling_paise) {
+    return fail(
+      'AMOUNT_EXCEEDS_CEILING',
+      `cart ${cart.total_paise} + already-spent ${spentPaise} exceeds ceiling ${intent.ceiling_paise}`,
+    )
+  }
 
   if (ctx.allowance === 'reserved') return fail('ALLOWANCE_RESERVED')
   if (ctx.allowance === 'consumed') return fail('ALLOWANCE_CONSUMED')

@@ -123,6 +123,42 @@ describe('GET /mandates', () => {
     expect(typeof row.created_at).toBe('number')
     expect(JSON.parse(row.intent_json)).toMatchObject({ mandateId: intent.mandateId })
   })
+
+  it('reports cumulative-wallet accounting: spent_paise, remaining_paise, and derived state', async () => {
+    const { app, db } = makeTestApp()
+    const { intent, agent } = makeIntent({ overrides: { ceiling_paise: 500_000 } })
+    await registerMandate(app, intent, credentialFor(agent))
+
+    const insertCaptured = (id: string, amount: number, hash: string) =>
+      db
+        .prepare(
+          `INSERT INTO settlements (id, mandate_id, cart_json, mandate_cart_hash_hex, amount_paise, merchant_id, state)
+           VALUES (?, ?, '{}', ?, ?, 'merchant-1', 'captured')`,
+        )
+        .run(id, intent.mandateId, hash, amount)
+
+    // One ₹2,000 capture against a ₹5,000 ceiling → ₹3,000 left, still active.
+    insertCaptured('s-1', 200_000, 'hash-1')
+    let json = (await (await getJson(app, '/mandates')).json()) as {
+      mandates: { spent_paise: number; remaining_paise: number; state: string }[]
+    }
+    expect(json.mandates[0]).toMatchObject({
+      spent_paise: 200_000,
+      remaining_paise: 300_000,
+      state: 'active',
+    })
+
+    // A second capture drains the ceiling exactly → remaining 0, state consumed.
+    insertCaptured('s-2', 300_000, 'hash-2')
+    json = (await (await getJson(app, '/mandates')).json()) as {
+      mandates: { spent_paise: number; remaining_paise: number; state: string }[]
+    }
+    expect(json.mandates[0]).toMatchObject({
+      spent_paise: 500_000,
+      remaining_paise: 0,
+      state: 'consumed',
+    })
+  })
 })
 
 describe('GET /ledger', () => {

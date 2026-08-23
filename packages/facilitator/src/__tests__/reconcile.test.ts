@@ -26,7 +26,7 @@ function paymentsOf(status: string, id = 'pay-1'): RazorpayPayment[] {
 }
 
 describe('applyCapture', () => {
-  it('drives a live attempt to captured: settlement captured, allowance consumed, ledger payment_captured', () => {
+  it('drives a live attempt to captured: settlement captured, allowance stays available, ledger payment_captured', () => {
     const db = openTestDb()
     const { settlementId, mandateId, attemptId } = makeSettlingAttempt(db, 'order-direct')
 
@@ -49,12 +49,14 @@ describe('applyCapture', () => {
       state: string
     }
     expect(settlement.state).toBe('captured')
+    // Cumulative wallet: capture leaves the allowance available — the mandate is
+    // reusable up to its ceiling, not single-use.
     const allowance = db
       .prepare('SELECT state FROM allowances WHERE mandate_id = ?')
       .get(mandateId) as {
       state: string
     }
-    expect(allowance.state).toBe('consumed')
+    expect(allowance.state).toBe('available')
     const ledgerTypes = (
       db
         .prepare('SELECT event_type FROM ledger_events WHERE settlement_id = ? ORDER BY seq')

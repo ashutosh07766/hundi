@@ -19,7 +19,7 @@ function expectSqliteConstraintViolation(fn: () => void): void {
 }
 
 describe('runOnce — happy path', () => {
-  it('captures on the first attempt: one captured attempt, settlement captured, allowance consumed', async () => {
+  it('captures on the first attempt: one captured attempt, settlement captured, allowance stays available (cumulative wallet)', async () => {
     const db = openTestDb()
     const now = 1_000_000
     const { settlementId, mandateId } = makeApprovedSettlement(db, { now, expiresAt: now + 3600 })
@@ -42,12 +42,14 @@ describe('runOnce — happy path', () => {
     expect(attempts).toHaveLength(1)
     expect(attempts[0]).toMatchObject({ state: 'captured', provider_payment_id: 'pay-happy' })
 
+    // Cumulative wallet: a capture does NOT consume the allowance — the mandate
+    // stays spendable until captured spend reaches the ceiling or it expires.
     const allowance = db
       .prepare('SELECT state FROM allowances WHERE mandate_id = ?')
       .get(mandateId) as {
       state: string
     }
-    expect(allowance.state).toBe('consumed')
+    expect(allowance.state).toBe('available')
 
     const ledgerTypes = (
       db

@@ -1,12 +1,15 @@
 import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { useIdentity } from '../context/identity-context.js'
+import { usePolling } from '../hooks/use-polling.js'
 import { markExternalAgentKey, saveLocalAgentKey } from '../lib/agent-key.js'
 import { mintCeremonyToken, registerMandate } from '../lib/api.js'
+import { FACILITATOR_URL } from '../lib/config.js'
 import { rupeesToPaise } from '../lib/format.js'
 import type { SignedCeremony } from '../lib/intent.js'
 import { buildSignedIntent } from '../lib/intent.js'
 import { generateKeypair } from '../lib/signing.js'
+import { listStores } from '../lib/stores.js'
 import { SignatureIcon } from './icons.js'
 
 function defaultExpiryLocal(hoursFromNow: number): string {
@@ -17,10 +20,12 @@ function defaultExpiryLocal(hoursFromNow: number): string {
 
 export function MandateCeremony() {
   const { human, dashboardToken, humanSign, humanCredential } = useIdentity()
+  const { data: stores } = usePolling(() => listStores(FACILITATOR_URL), 4000)
 
   const [goal, setGoal] = useState('')
   const [ceilingRupees, setCeilingRupees] = useState('2000')
   const [thresholdRupees, setThresholdRupees] = useState('500')
+  const [selectedStore, setSelectedStore] = useState('')
   const [merchantsCsv, setMerchantsCsv] = useState('')
   const [expiryLocal, setExpiryLocal] = useState(() => defaultExpiryLocal(1))
   const [agentPubkeyHex, setAgentPubkeyHex] = useState('')
@@ -170,13 +175,43 @@ export function MandateCeremony() {
         <fieldset className="form-group">
           <legend className="form-group__legend">Scope</legend>
           <label className="field">
+            <span>Store</span>
+            <select
+              value={selectedStore}
+              onChange={(e) => {
+                const merchantId = e.target.value
+                setSelectedStore(merchantId)
+                if (merchantId) setMerchantsCsv(merchantId)
+              }}
+            >
+              <option value="">— choose a shoppable store —</option>
+              {(stores ?? []).map((store) => (
+                <option key={store.merchant_id} value={store.merchant_id}>
+                  {store.name} ({store.merchant_id})
+                </option>
+              ))}
+            </select>
+            <small className="field__hint">
+              Picking a store fills in the merchant below. Onboard a real store first from the
+              Stores tab if it isn't listed yet.
+            </small>
+          </label>
+
+          <label className="field">
             <span>Merchants (comma-separated)</span>
             <input
               required
               value={merchantsCsv}
-              onChange={(e) => setMerchantsCsv(e.target.value)}
+              onChange={(e) => {
+                setMerchantsCsv(e.target.value)
+                setSelectedStore('')
+              }}
               placeholder="merchant-1, merchant-2"
             />
+            <small className="field__hint">
+              Auto-filled by the store picker above. Edit directly for multi-merchant or advanced
+              scopes.
+            </small>
           </label>
 
           <label className="field">

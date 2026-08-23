@@ -15,12 +15,7 @@
 import type { Credential, SigEnvelope } from '@hundi/core'
 import type { ReactNode } from 'react'
 import { createContext, useContext, useMemo, useState } from 'react'
-import {
-  getDashboardToken,
-  getStoreUrl,
-  setDashboardToken as persistDashboardToken,
-  setStoreUrl as persistStoreUrl,
-} from '../lib/config.js'
+import { getDashboardToken, setDashboardToken as persistDashboardToken } from '../lib/config.js'
 import type { HumanIdentity, SignerMode } from '../lib/human-signer.js'
 import { humanSign as dispatchHumanSign, resolveHumanCredential } from '../lib/human-signer.js'
 import type { HumanKeypair } from '../lib/signing.js'
@@ -51,8 +46,6 @@ type IdentityContextValue = {
   resetHuman: () => void
   dashboardToken: string
   setDashboardToken: (token: string) => void
-  storeUrl: string
-  setStoreUrl: (url: string) => void
   signerMode: SignerMode
   passkey: PasskeyIdentity | null
   /** Set when passkey mode was requested but couldn't be activated — WebAuthn
@@ -77,7 +70,6 @@ const IdentityContext = createContext<IdentityContextValue | null>(null)
 export function IdentityProvider({ children }: { children: ReactNode }) {
   const [human, setHuman] = useState<HumanKeypair>(() => loadOrCreateHumanKeypair())
   const [dashboardToken, setTokenState] = useState<string>(() => getDashboardToken())
-  const [storeUrl, setStoreUrlState] = useState<string>(() => getStoreUrl())
   const [signerMode, setSignerMode] = useState<SignerMode>('ed25519')
   const [passkey, setPasskey] = useState<PasskeyIdentity | null>(() => loadStoredPasskey())
   const [passkeyNotice, setPasskeyNotice] = useState<string | null>(null)
@@ -134,11 +126,6 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
         persistDashboardToken(token)
         setTokenState(token)
       },
-      storeUrl,
-      setStoreUrl: (url: string) => {
-        persistStoreUrl(url)
-        setStoreUrlState(url)
-      },
       signerMode,
       passkey,
       passkeyNotice,
@@ -146,7 +133,7 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
       humanCredential: () => resolveHumanCredential(identity()),
       humanSign: (payloadBytes: Uint8Array) => dispatchHumanSign(identity(), payloadBytes),
     }
-  }, [human, dashboardToken, storeUrl, signerMode, passkey, passkeyNotice])
+  }, [human, dashboardToken, signerMode, passkey, passkeyNotice])
 
   return <IdentityContext.Provider value={value}>{children}</IdentityContext.Provider>
 }

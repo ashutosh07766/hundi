@@ -467,7 +467,8 @@ code,
   gap: var(--space-4);
 }
 
-input {
+input,
+select {
   background: var(--bg-elev-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -478,7 +479,8 @@ input {
   transition: border-color 120ms ease;
 }
 
-input:focus {
+input:focus,
+select:focus {
   outline: none;
   border-color: var(--accent-dim);
 }

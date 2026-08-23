@@ -57,7 +57,7 @@ function safeParseIntent(intentJson: string): IntentMandate | null {
 }
 
 export function MandatesList() {
-  const { humanSign, storeUrl } = useIdentity()
+  const { humanSign } = useIdentity()
   const { data: mandates, error: pollError, loading } = usePolling(listMandates, 2000)
   const [statusById, setStatusById] = useState<Record<string, RowStatus>>({})
   const [purchaseById, setPurchaseById] = useState<Record<string, PurchaseStatus>>({})
@@ -85,7 +85,6 @@ export function MandatesList() {
         mandateId,
         intent,
         agentKeyPair: agentKey,
-        storeUrl,
         facilitatorUrl: FACILITATOR_URL,
         poisoned,
         onStep: (message) =>

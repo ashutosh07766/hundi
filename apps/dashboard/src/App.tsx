@@ -5,9 +5,11 @@ import { LiveLedger } from './components/LiveLedger.js'
 import { MandateCeremony } from './components/MandateCeremony.js'
 import { MandatesList } from './components/MandatesList.js'
 import { PendingApprovals } from './components/PendingApprovals.js'
+import { Stores } from './components/Stores.js'
 import { IdentityProvider } from './context/identity-context.js'
 
 const TABS = [
+  { id: 'stores', label: 'Stores' },
   { id: 'ceremony', label: 'Mandate ceremony' },
   { id: 'approvals', label: 'Pending approvals' },
   { id: 'ledger', label: 'Live ledger' },
@@ -17,7 +19,7 @@ const TABS = [
 type TabId = (typeof TABS)[number]['id']
 
 function App() {
-  const [tab, setTab] = useState<TabId>('ceremony')
+  const [tab, setTab] = useState<TabId>('stores')
 
   return (
     <IdentityProvider>
@@ -37,6 +39,7 @@ function App() {
           ))}
         </nav>
         <main className="main">
+          {tab === 'stores' && <Stores />}
           {tab === 'ceremony' && <MandateCeremony />}
           {tab === 'approvals' && <PendingApprovals />}
           {tab === 'ledger' && <LiveLedger />}

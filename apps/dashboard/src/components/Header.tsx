@@ -10,10 +10,12 @@ function truncate(value: string): string {
 
 /**
  * Product header + the collapsible technical-config disclosure. The
- * connection settings (facilitator/store URLs, signer mode, keys, dashboard
- * token) stay fully functional here — they're just tucked behind a closed
+ * connection settings (facilitator URL, signer mode, keys, dashboard token)
+ * stay fully functional here — they're just tucked behind a closed
  * "Settings" panel instead of always occupying the top of the screen, so the
- * default view reads as a product rather than a debug console.
+ * default view reads as a product rather than a debug console. Which store
+ * catalog gets shopped is scoped per-mandate (see the Stores tab + mandate
+ * ceremony dropdown), not a global connection setting.
  */
 export function Header() {
   const {
@@ -21,15 +23,12 @@ export function Header() {
     resetHuman,
     dashboardToken,
     setDashboardToken,
-    storeUrl,
-    setStoreUrl,
     signerMode,
     passkey,
     passkeyNotice,
     selectSignerMode,
   } = useIdentity()
   const [tokenDraft, setTokenDraft] = useState(dashboardToken)
-  const [storeDraft, setStoreDraft] = useState(storeUrl)
   const [switchingTo, setSwitchingTo] = useState<SignerMode | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
@@ -87,28 +86,6 @@ export function Header() {
                 <span className="settings-field__label">Facilitator</span>
                 <code className="settings-field__value">{FACILITATOR_URL}</code>
               </div>
-
-              <form
-                className="settings-field"
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  setStoreUrl(storeDraft)
-                }}
-              >
-                <span className="settings-field__label">Store</span>
-                <div className="settings-field__row">
-                  <input
-                    className="settings-field__input"
-                    type="text"
-                    value={storeDraft}
-                    placeholder="http://127.0.0.1:8791"
-                    onChange={(e) => setStoreDraft(e.target.value)}
-                  />
-                  <button type="submit" className="btn btn--ghost btn--small">
-                    Save
-                  </button>
-                </div>
-              </form>
 
               <form
                 className="settings-field"

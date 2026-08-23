@@ -136,11 +136,11 @@ describe('runTestPurchase', () => {
     globalThis.fetch = originalFetch
   })
 
-  it('fetches the catalog, signs a cart with the agent key, and POSTs it with an Idempotency-Key', async () => {
+  it('fetches the mandate merchant catalog from the facilitator, signs a cart with the agent key, and POSTs it with an Idempotency-Key', async () => {
     const calls: Array<{ url: string; init: RequestInit | undefined }> = []
     const mockFetch = vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({ url, init })
-      if (url.endsWith('/api/catalog')) {
+      if (url.endsWith('/catalog/demo-store-1')) {
         return new Response(JSON.stringify(CATALOG), { status: 200 })
       }
       if (url.endsWith('/settlements')) {
@@ -157,7 +157,6 @@ describe('runTestPurchase', () => {
       mandateId: 'mandate-1',
       intent: { ...INTENT, agent_pubkey_hex: agentKeyPair.publicKeyHex },
       agentKeyPair,
-      storeUrl: 'http://127.0.0.1:8791',
       facilitatorUrl: 'http://127.0.0.1:8790',
       poisoned: false,
     })
@@ -169,7 +168,7 @@ describe('runTestPurchase', () => {
       paymentId: 'settle-1',
     })
 
-    expect(calls[0]?.url).toBe('http://127.0.0.1:8791/api/catalog')
+    expect(calls[0]?.url).toBe('http://127.0.0.1:8790/catalog/demo-store-1')
     const postCall = calls.find((c) => c.url === 'http://127.0.0.1:8790/settlements')
     expect(postCall).toBeDefined()
     expect(postCall?.init?.method).toBe('POST')
@@ -189,7 +188,7 @@ describe('runTestPurchase', () => {
 
   it('poisoned mode builds a cart pointing at the attacker merchant, and surfaces a facilitator block as ok:false', async () => {
     const mockFetch = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.includes('/api/catalog')) {
+      if (url.includes('/catalog/demo-store-1')) {
         expect(url).toContain('poisoned=1')
         return new Response(JSON.stringify([...CATALOG, POISONED_PRODUCT]), { status: 200 })
       }
@@ -214,7 +213,6 @@ describe('runTestPurchase', () => {
       mandateId: 'mandate-1',
       intent: { ...INTENT, agent_pubkey_hex: agentKeyPair.publicKeyHex },
       agentKeyPair,
-      storeUrl: 'http://127.0.0.1:8791',
       facilitatorUrl: 'http://127.0.0.1:8790',
       poisoned: true,
     })
@@ -224,9 +222,9 @@ describe('runTestPurchase', () => {
     expect(result.reason).toBe('MERCHANT_NOT_IN_SCOPE')
   })
 
-  it('reports a no-candidate outcome without ever calling the facilitator', async () => {
+  it('reports a no-candidate outcome without ever calling the facilitator settlement endpoint', async () => {
     const mockFetch = vi.fn(async (url: string) => {
-      if (url.endsWith('/api/catalog')) {
+      if (url.endsWith('/catalog/demo-store-1')) {
         return new Response(JSON.stringify([]), { status: 200 })
       }
       throw new Error(`unexpected fetch to ${url}`)
@@ -237,12 +235,27 @@ describe('runTestPurchase', () => {
       mandateId: 'mandate-1',
       intent: INTENT,
       agentKeyPair,
-      storeUrl: 'http://127.0.0.1:8791',
       facilitatorUrl: 'http://127.0.0.1:8790',
       poisoned: false,
     })
 
     expect(result).toEqual({ ok: false, state: 'blocked', reason: 'NO_CANDIDATE' })
     expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports a clean block when the mandate has no merchant in scope, without calling fetch', async () => {
+    const mockFetch = vi.fn()
+    globalThis.fetch = mockFetch as unknown as typeof fetch
+
+    const result = await runTestPurchase({
+      mandateId: 'mandate-1',
+      intent: { ...INTENT, merchants: [] },
+      agentKeyPair,
+      facilitatorUrl: 'http://127.0.0.1:8790',
+      poisoned: false,
+    })
+
+    expect(result).toEqual({ ok: false, state: 'blocked', reason: 'NO_MERCHANT_IN_SCOPE' })
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 })

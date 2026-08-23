@@ -15,6 +15,13 @@
  * regardless of which process built and signed it — this module has no
  * elevated trust and could be deleted without changing what the facilitator
  * accepts.
+ *
+ * The catalog is always fetched from the FACILITATOR (GET
+ * /catalog/:merchant_id — packages/facilitator/src/routes/stores.ts), keyed
+ * on the mandate's own merchant, never from a separately-configured store
+ * URL. That's what makes "shop this mandate" unambiguous: there is no store
+ * selection step that could point at a catalog for a different merchant than
+ * the one the signed intent actually scopes spending to.
  */
 
 import type { CartItem, CartMandate, IntentMandate } from '@hundi/core'
@@ -29,7 +36,9 @@ export type AgentKeyPair = HumanKeypair
 
 export type StoreAvailability = { status: 'in_stock' | 'out_of_stock' }
 
-/** The shape apps/store/src/app.ts's toFeedProduct emits at GET /api/catalog. */
+/** The shape the facilitator's GET /catalog/:merchant_id emits (packages/
+ * facilitator/src/feed-product.ts) — the same normalized shape whether the
+ * listing came from a real-store scan or the built-in demo store. */
 export type StoreProduct = {
   id: string
   title: string
@@ -107,10 +116,16 @@ export function signCart(unsigned: UnsignedCart, agentKeyPair: AgentKeyPair): Ca
   return { ...unsigned, agent_sig_hex: sig.signature_hex }
 }
 
-async function fetchCatalog(storeUrl: string, poisoned: boolean): Promise<StoreProduct[]> {
+async function fetchCatalog(
+  facilitatorUrl: string,
+  merchantId: string,
+  poisoned: boolean,
+): Promise<StoreProduct[]> {
   const qs = poisoned ? '?poisoned=1' : ''
-  const res = await fetch(`${storeUrl.replace(/\/$/, '')}/api/catalog${qs}`)
-  if (!res.ok) throw new Error(`store catalog fetch failed with status ${res.status}`)
+  const res = await fetch(
+    `${facilitatorUrl.replace(/\/$/, '')}/catalog/${encodeURIComponent(merchantId)}${qs}`,
+  )
+  if (!res.ok) throw new Error(`facilitator catalog fetch failed with status ${res.status}`)
   return (await res.json()) as StoreProduct[]
 }
 
@@ -208,24 +223,29 @@ export type TestPurchaseResult = {
   paymentId?: string
 }
 
-/** Runs one end-to-end test-purchase attempt: fetch the store's catalog, pick a
- * product (see `pickProduct`), sign a cart with the agent key, submit it to the
- * facilitator, and poll to a terminal/pending state. Every network call is
- * scoped to `storeUrl`/`facilitatorUrl` — no other endpoint is ever reached.
- * `onStep` is optional narration for an inline status line; the function's
- * behavior is identical whether or not a caller passes one. */
+/** Runs one end-to-end test-purchase attempt: fetch the mandate's merchant
+ * catalog from the facilitator, pick a product (see `pickProduct`), sign a
+ * cart with the agent key, submit it to the facilitator, and poll to a
+ * terminal/pending state. The merchant shopped is `intent.merchants[0]` — the
+ * mandate ceremony's store dropdown (see MandateCeremony.tsx) keeps that
+ * array single-merchant for the common case, so there's no separate "which
+ * store" input here to drift out of sync with what the mandate actually
+ * authorizes. `onStep` is optional narration for an inline status line; the
+ * function's behavior is identical whether or not a caller passes one. */
 export async function runTestPurchase(args: {
   mandateId: string
   intent: IntentMandate
   agentKeyPair: AgentKeyPair
-  storeUrl: string
   facilitatorUrl: string
   poisoned: boolean
   onStep?: (message: string) => void
 }): Promise<TestPurchaseResult> {
   const step = args.onStep ?? (() => {})
+  const merchantId = args.intent.merchants[0]
+  if (!merchantId) return { ok: false, state: 'blocked', reason: 'NO_MERCHANT_IN_SCOPE' }
+
   step('shopping…')
-  const products = await fetchCatalog(args.storeUrl, args.poisoned)
+  const products = await fetchCatalog(args.facilitatorUrl, merchantId, args.poisoned)
   const pick = pickProduct(products, args.intent, args.poisoned)
   if (!pick.ok) return { ok: false, state: 'blocked', reason: pick.reason }
   step(`picked ${pick.product.title} at ${formatPaise(pick.unitPricePaise)}`)

@@ -166,4 +166,23 @@ describe('extractLinks', () => {
       'https://shop.example.com/products/b',
     ])
   })
+
+  it('drops cart/checkout/account routes and their sub-paths', () => {
+    const html = `
+      <a href="/products/a">A</a>
+      <a href="/cart">Cart</a>
+      <a href="/cart/change?line=1">Change</a>
+      <a href="/checkout">Checkout</a>
+      <a href="/account">Account</a>
+      <a href="/account/login">Login</a>
+    `
+    const links = extractLinks(html, BASE_URL)
+    expect(links).toEqual(['https://shop.example.com/products/a'])
+  })
+
+  it('does not drop a product path that merely contains "cart" as a substring', () => {
+    const html = `<a href="/products/golf-cart-cover">Golf Cart Cover</a>`
+    const links = extractLinks(html, BASE_URL)
+    expect(links).toEqual(['https://shop.example.com/products/golf-cart-cover'])
+  })
 })

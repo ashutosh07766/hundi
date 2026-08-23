@@ -356,8 +356,16 @@ export function extractProducts(
   return { products, warnings }
 }
 
+/** Cart/checkout/account routes are storefront machinery, not product pages
+ * — sampling them wastes a fetch at best and, at worst, feeds whatever page
+ * they render (mini-cart recommendation widgets, recently-viewed strips)
+ * into the product extractor under that non-product URL. Matches the path
+ * itself or any sub-path (`/cart`, `/cart/change`, `/account/login`, …). */
+const NON_PRODUCT_PATH_RE = /^\/(cart|checkout|account)(\/|$)/i
+
 /** Same-origin links out of a page, deduped and hash-stripped, in document
- * order. Used to sample linked product pages when the scanned URL is an
+ * order, excluding cart/checkout/account routes (see `NON_PRODUCT_PATH_RE`).
+ * Used to sample linked product pages when the scanned URL is an
  * index/listing rather than a single product page. */
 export function extractLinks(html: string, baseUrl: string): string[] {
   const base = new URL(baseUrl)
@@ -375,6 +383,7 @@ export function extractLinks(html: string, baseUrl: string): string[] {
     }
     if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') continue
     if (resolved.origin !== base.origin) continue
+    if (NON_PRODUCT_PATH_RE.test(resolved.pathname)) continue
     resolved.hash = ''
     const normalized = resolved.toString()
     if (seen.has(normalized)) continue
@@ -453,6 +462,90 @@ function buildScannedVariants(raw: Record<string, unknown>[]): ScannedVariant[] 
     })
   }
   return variants.length > 1 ? variants : undefined
+}
+
+/** A handle ending in one of these is a reserved storefront route, not a
+ * merchant-chosen product slug — `cart`, `checkout`, and `account` are
+ * Shopify's own top-level route names. Shopify's built-in handle-collision
+ * resolver appends a number (`-1`, `-2`, …), never one of these words, so a
+ * handle carrying this exact suffix is a signal something outside normal
+ * catalog flow produced it (a cart-drawer upsell app creating a shadow
+ * product, a scraped non-product link mistaken for a handle, etc.). */
+const RESERVED_ROUTE_SUFFIX_RE = /-(cart|checkout|account)$/i
+
+/** Merges two catalog records that resolved to the same handle — the
+ * exact-handle collision case (pagination overlap, a product listed under
+ * more than one collection feed) where dropping the second occurrence would
+ * silently discard whatever stock state it carried. Variants are unioned by
+ * `variant_id`; a variant reported available by either record wins, since
+ * both describe the same live inventory and letting a stale "unavailable"
+ * snapshot override a fresher "available" one is exactly the false-negative
+ * this function exists to prevent. */
+function mergeDuplicateShopifyProduct(a: ScannedProduct, b: ScannedProduct): ScannedProduct {
+  const byVariantId = new Map<string, ScannedVariant>()
+  for (const variant of a.variants ?? []) byVariantId.set(variant.variant_id, variant)
+  for (const variant of b.variants ?? []) {
+    const existing = byVariantId.get(variant.variant_id)
+    byVariantId.set(
+      variant.variant_id,
+      existing ? { ...variant, available: existing.available || variant.available } : variant,
+    )
+  }
+  const mergedVariants = [...byVariantId.values()]
+  const mergedOptions = a.options ?? b.options
+
+  return {
+    ...a,
+    description: a.description || b.description,
+    image: a.image || b.image,
+    availability:
+      a.availability === 'in_stock' || b.availability === 'in_stock' ? 'in_stock' : 'out_of_stock',
+    ...(mergedOptions ? { options: mergedOptions } : {}),
+    ...(mergedVariants.length > 1 ? { variants: mergedVariants } : {}),
+  }
+}
+
+/** Collapses duplicate catalog entries before they reach the caller. Two
+ * shapes land here: the same handle appearing twice in one batch (merged via
+ * `mergeDuplicateShopifyProduct`), and a handle ending in a reserved
+ * storefront route word whose base handle — the same string with that
+ * suffix removed — exactly matches another product's handle *and* name in
+ * the same batch. The latter is excluded rather than merged: it isn't a
+ * purchasable listing, so its stock data isn't trustworthy input to fold
+ * into the real product. Requiring both an exact base-handle match and a
+ * matching name before excluding means a genuinely distinct product whose
+ * name happens to end in one of those words (no sibling handle, or a
+ * different name) is left untouched — conservative by construction. */
+function dedupeShopifyProducts(products: ScannedProduct[], warnings: string[]): ScannedProduct[] {
+  const byHandle = new Map<string, ScannedProduct>()
+  const order: string[] = []
+
+  for (const product of products) {
+    const existing = byHandle.get(product.sku)
+    if (existing) {
+      byHandle.set(product.sku, mergeDuplicateShopifyProduct(existing, product))
+      warnings.push(`merged duplicate Shopify catalog entry for handle "${product.sku}"`)
+      continue
+    }
+    byHandle.set(product.sku, product)
+    order.push(product.sku)
+  }
+
+  const result: ScannedProduct[] = []
+  for (const handle of order) {
+    const product = byHandle.get(handle)
+    if (!product) continue
+    const baseHandle = handle.replace(RESERVED_ROUTE_SUFFIX_RE, '')
+    const base = baseHandle !== handle ? byHandle.get(baseHandle) : undefined
+    if (base && base.name === product.name) {
+      warnings.push(
+        `excluded "${handle}" as a non-product duplicate of "${baseHandle}" (reserved-route handle suffix)`,
+      )
+      continue
+    }
+    result.push(product)
+  }
+  return result
 }
 
 /** Maps Shopify's `/products.json` storefront feed onto the scanner's product
@@ -546,7 +639,7 @@ export function extractShopifyProducts(
     })
   }
 
-  return { products, warnings }
+  return { products: dedupeShopifyProducts(products, warnings), warnings }
 }
 
 export function deriveMerchantId(url: string): string {
@@ -576,8 +669,12 @@ async function fetchShopifyProductsJson(
   warnings: string[],
 ): Promise<ScannedProduct[]> {
   for (const path of SHOPIFY_PRODUCTS_JSON_PATHS) {
-    const collected: ScannedProduct[] = []
-    const seenSkus = new Set<string>()
+    // Raw, pre-dedupe accumulation — each page already ran through
+    // `dedupeShopifyProducts` inside `extractShopifyProducts`, but a handle
+    // can still repeat *across* pages (catalog drift mid-scan, a product
+    // listed under more than one collection), so a second pass runs once
+    // every page is in, folding stock data together instead of dropping it.
+    let collected: ScannedProduct[] = []
     let sawUsablePage = false
 
     for (let page = 1; page <= SHOPIFY_PRODUCTS_JSON_MAX_PAGES; page++) {
@@ -605,18 +702,15 @@ async function fetchShopifyProductsJson(
 
       const extracted = extractShopifyProducts(parsed, pageUrl, merchantId)
       warnings.push(...extracted.warnings)
-      for (const product of extracted.products) {
-        if (seenSkus.has(product.sku)) continue
-        seenSkus.add(product.sku)
-        collected.push(product)
-      }
+      collected.push(...extracted.products)
 
       const pageWasFull = rawProducts.length >= SHOPIFY_PRODUCTS_JSON_LIMIT
       if (!pageWasFull || collected.length >= SHOPIFY_PRODUCTS_JSON_MAX_PRODUCTS) break
     }
 
     if (sawUsablePage && collected.length > 0) {
-      return collected.slice(0, SHOPIFY_PRODUCTS_JSON_MAX_PRODUCTS)
+      collected = dedupeShopifyProducts(collected, warnings)
+      if (collected.length > 0) return collected.slice(0, SHOPIFY_PRODUCTS_JSON_MAX_PRODUCTS)
     }
   }
 

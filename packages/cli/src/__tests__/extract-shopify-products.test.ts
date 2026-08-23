@@ -158,6 +158,106 @@ describe('extractShopifyProducts', () => {
   })
 })
 
+describe('extractShopifyProducts — duplicate handling', () => {
+  function sockVariant(id: number, color: string, available: boolean) {
+    return { id, title: color, option1: color, price: '499.00', available }
+  }
+
+  it('excludes a reserved-route-suffixed handle that duplicates a real product, keeps a genuinely distinct sibling', () => {
+    const json = shopifyFeed([
+      {
+        handle: 'frido-active-socks',
+        title: 'Frido Active Socks',
+        vendor: 'Frido',
+        options: [{ name: 'Color', values: ['Black', 'Red'] }],
+        variants: [sockVariant(1, 'Black', true), sockVariant(2, 'Red', true)],
+      },
+      {
+        // A real, distinct product — same title, but "ankle length" is a
+        // meaningful qualifier, not a reserved storefront route word, so it
+        // must never be treated as a duplicate of the base product.
+        handle: 'frido-active-socks-ankle-length',
+        title: 'Frido Active Socks',
+        vendor: 'Frido',
+        options: [{ name: 'Color', values: ['Black', 'Red'] }],
+        variants: [sockVariant(3, 'Black', false), sockVariant(4, 'Red', true)],
+      },
+      {
+        // Shadow/duplicate listing — same title as the base product, handle
+        // carries the reserved "-cart" route suffix, and shows a color as
+        // out of stock while the base listing shows it in stock.
+        handle: 'frido-active-socks-cart',
+        title: 'Frido Active Socks',
+        vendor: 'Frido',
+        options: [{ name: 'Color', values: ['Black', 'Red'] }],
+        variants: [sockVariant(5, 'Black', true), sockVariant(6, 'Red', false)],
+      },
+    ])
+
+    const { products, warnings } = extractShopifyProducts(json, BASE_URL, 'myfrido-com')
+
+    expect(products.map((p) => p.sku).sort()).toEqual([
+      'frido-active-socks',
+      'frido-active-socks-ankle-length',
+    ])
+    const base = products.find((p) => p.sku === 'frido-active-socks')
+    // The base listing's own stock data is untouched by the excluded duplicate.
+    expect(base?.variants?.every((v) => v.available)).toBe(true)
+    expect(
+      warnings.some(
+        (w) => w.includes('excluded "frido-active-socks-cart"') && w.includes('frido-active-socks'),
+      ),
+    ).toBe(true)
+  })
+
+  it('does not exclude a "-cart" handle when no sibling with a matching name exists', () => {
+    const json = shopifyFeed([
+      {
+        handle: 'golf-cart',
+        title: 'Golf Cart Cover',
+        vendor: 'Acme',
+        variants: [{ sku: 'SKU-GC', price: '999.00', available: true }],
+      },
+    ])
+    const { products, warnings } = extractShopifyProducts(json, BASE_URL, 'myfrido-com')
+    expect(products.map((p) => p.sku)).toEqual(['golf-cart'])
+    expect(warnings).toHaveLength(0)
+  })
+
+  it('merges two catalog entries that share the same handle, unioning variants and favoring availability', () => {
+    const json = shopifyFeed([
+      {
+        handle: 'dup-product',
+        title: 'Dup Product',
+        vendor: 'Frido',
+        options: [{ name: 'Color', values: ['Black', 'Red'] }],
+        variants: [sockVariant(10, 'Black', true), sockVariant(11, 'Red', false)],
+      },
+      {
+        // Same handle, e.g. listed under a second collection page — stock
+        // states disagree with the first occurrence for both variants.
+        handle: 'dup-product',
+        title: 'Dup Product',
+        vendor: 'Frido',
+        options: [{ name: 'Color', values: ['Black', 'Red'] }],
+        variants: [sockVariant(10, 'Black', false), sockVariant(11, 'Red', true)],
+      },
+    ])
+
+    const { products, warnings } = extractShopifyProducts(json, BASE_URL, 'myfrido-com')
+
+    expect(products).toHaveLength(1)
+    const merged = products[0]!
+    expect(merged.sku).toBe('dup-product')
+    expect(merged.variants).toHaveLength(2)
+    // A variant reported available by either occurrence wins.
+    expect(merged.variants?.every((v) => v.available)).toBe(true)
+    expect(warnings.some((w) => w.includes('merged duplicate') && w.includes('dup-product'))).toBe(
+      true,
+    )
+  })
+})
+
 describe('extractShopifyProducts — variants', () => {
   it('captures every variant with its option_values for a multi-variant product', () => {
     const json = shopifyFeed([

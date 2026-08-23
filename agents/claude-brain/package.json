@@ -1,0 +1,21 @@
+{
+  "name": "@hundi/claude-brain",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "buy": "tsx --env-file=../../.env src/index.ts",
+    "smoke:claude": "tsx --env-file=../../.env bin/smoke-claude.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.120.0",
+    "@hundi/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "tsx": "^4.20.0",
+    "vitest": "^4.0.0"
+  }
+}

@@ -35,6 +35,15 @@ const IFRAME_SELECTORS = ['iframe.razorpay-checkout-frame', 'iframe[src*="razorp
 // when the first pick is flagged that way on a given run.
 const NETBANK_CANDIDATES = ['Canara Bank', 'Punjab National Bank - Retail Banking', 'IDBI']
 
+/** Points the driver at a merchant's real Shopify cart permalink for a specific
+ * variant instead of this process's own locally-hosted checkout-page host. */
+export interface VariantCartTarget {
+  /** The merchant's storefront origin (e.g. "https://my-store.myshopify.com"). */
+  storeOrigin: string
+  variantId: string
+  qty: number
+}
+
 export interface SettleViaCheckoutArgs {
   orderId: string
   amountPaise: number
@@ -46,6 +55,39 @@ export interface SettleViaCheckoutArgs {
   /** Which button to click on Razorpay's mock bank page. Defaults to 'success' — a
    * real settle attempt never asks for 'failure'; it exists for driver-level tests. */
   outcome?: 'success' | 'failure'
+  /** When present, the browser's first navigation goes to this variant's Shopify
+   * cart permalink (`{storeOrigin}/cart/{variantId}:{qty}`) instead of this
+   * process's own locally-hosted checkout-page host — Shopify adds exactly that
+   * variant to the cart and proceeds to its own checkout, so the merchant's order
+   * records the chosen size/color. Every selector and timeout downstream is
+   * unchanged: Razorpay's checkout.js overlay (iframe, Netbanking tab, mock-bank
+   * buttons) renders identically regardless of which page embeds it, so the same
+   * driving logic applies whether the embed is this process's local host page or
+   * the merchant's real storefront. Absent → the existing local-host flow, byte-
+   * for-byte unchanged. */
+  variant?: VariantCartTarget
+}
+
+/** Pure — builds the Shopify variant cart permalink `settleViaCheckout` navigates
+ * to when `args.variant` is present. Exported so the URL construction is testable
+ * without driving a real (or mocked) browser through the full checkout flow. */
+export function buildVariantCartUrl(variant: VariantCartTarget): string {
+  const origin = variant.storeOrigin.replace(/\/$/, '')
+  return `${origin}/cart/${encodeURIComponent(variant.variantId)}:${variant.qty}`
+}
+
+/** Pure — builds the URL to this process's own locally-hosted checkout-page host
+ * (see checkout-page.ts), the non-variant navigation target. Exported for the same
+ * testability reason as `buildVariantCartUrl`. */
+export function buildLocalCheckoutUrl(args: {
+  orderId: string
+  amountPaise: number
+  keyId: string
+  port: number
+}): string {
+  return `http://localhost:${args.port}/?order_id=${encodeURIComponent(
+    args.orderId,
+  )}&amount=${args.amountPaise}&currency=INR&key=${encodeURIComponent(args.keyId)}`
 }
 
 export type DetectedVia = 'handler' | 'api-poll'
@@ -269,7 +311,18 @@ export function createCheckoutDriver(config: CheckoutDriverConfig): CheckoutDriv
       let page: Page | undefined
 
       try {
-        const server = await getCheckoutPageServer(port)
+        // The local checkout-page host is only needed for the non-variant path — a
+        // variant navigation goes straight to the merchant's own storefront, so
+        // starting it in that branch would be pure overhead with nothing to serve.
+        const url = args.variant
+          ? buildVariantCartUrl(args.variant)
+          : buildLocalCheckoutUrl({
+              orderId: args.orderId,
+              amountPaise: args.amountPaise,
+              keyId: config.keyId,
+              port: (await getCheckoutPageServer(port)).port,
+            })
+
         browser = await chromium.launch({ headless: true })
         const context = await browser.newContext({ viewport: { width: 1280, height: 720 } })
         page = await context.newPage()
@@ -280,9 +333,6 @@ export function createCheckoutDriver(config: CheckoutDriverConfig): CheckoutDriv
           consoleLog.push(`[pageerror] ${err.message}`)
         })
 
-        const url = `http://localhost:${server.port}/?order_id=${encodeURIComponent(
-          args.orderId,
-        )}&amount=${args.amountPaise}&currency=INR&key=${encodeURIComponent(config.keyId)}`
         logStep('navigate', true, { url })
         // domcontentloaded only — checkout.js keeps a long-poll open for the
         // lifetime of the overlay, so networkidle never resolves.

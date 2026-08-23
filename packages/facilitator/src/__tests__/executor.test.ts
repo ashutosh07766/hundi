@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SettleDriver } from '../executor.js'
 import { createExecutor, handleProviderCapture, runOnce } from '../executor.js'
 import { transitionSettlement } from '../state-machine.js'
+import { upsertMerchant } from '../store-catalog-repo.js'
 import {
   baseRunnerDeps,
   captured,
@@ -83,6 +84,92 @@ describe('runOnce — happy path', () => {
     await runOnce({ ...baseRunnerDeps(db), driver, now: () => now }, settlementId)
 
     expect(seenBeforeDriverCall).toEqual({ attemptCount: 1, orderIdMatches: true })
+  })
+})
+
+describe('runOnce — variant threading into the checkout driver', () => {
+  it('passes storeOrigin/variantId/qty to the driver when the cart item has a variant_id and the merchant has a catalog_url', async () => {
+    const db = openTestDb()
+    const now = 1_000_000
+    upsertMerchant(db, {
+      merchantId: 'merchant-1',
+      name: 'Test Merchant',
+      catalogUrl: 'https://my-store.myshopify.com/products.json',
+      catalogPrices: { 'sku-1': 160_000 },
+    })
+    const { settlementId } = makeApprovedSettlement(db, {
+      now,
+      expiresAt: now + 3600,
+      amountPaise: 320_000,
+      items: [{ sku: 'sku-1', qty: 2, unit_price_paise: 160_000, variant_id: 'variant-11-black' }],
+    })
+    const driver = makeScriptedDriver([captured()])
+
+    await runOnce({ ...baseRunnerDeps(db), driver, now: () => now }, settlementId)
+
+    expect(driver.calls).toHaveLength(1)
+    expect(driver.calls[0]?.variant).toEqual({
+      storeOrigin: 'https://my-store.myshopify.com',
+      variantId: 'variant-11-black',
+      qty: 2,
+    })
+  })
+
+  it('omits variant when the cart item has no variant_id, even if the merchant has a catalog_url', async () => {
+    const db = openTestDb()
+    const now = 1_000_000
+    upsertMerchant(db, {
+      merchantId: 'merchant-1',
+      name: 'Test Merchant',
+      catalogUrl: 'https://my-store.myshopify.com/products.json',
+      catalogPrices: { 'sku-1': 100_000 },
+    })
+    const { settlementId } = makeApprovedSettlement(db, { now, expiresAt: now + 3600 })
+    const driver = makeScriptedDriver([captured()])
+
+    await runOnce({ ...baseRunnerDeps(db), driver, now: () => now }, settlementId)
+
+    expect(driver.calls[0]?.variant).toBeUndefined()
+  })
+
+  it('omits variant when the cart item has a variant_id but the merchant has no catalog_url on file', async () => {
+    const db = openTestDb()
+    const now = 1_000_000
+    const { settlementId } = makeApprovedSettlement(db, {
+      now,
+      expiresAt: now + 3600,
+      items: [{ sku: 'sku-1', qty: 1, unit_price_paise: 100_000, variant_id: 'variant-11' }],
+    })
+    const driver = makeScriptedDriver([captured()])
+
+    await runOnce({ ...baseRunnerDeps(db), driver, now: () => now }, settlementId)
+
+    expect(driver.calls[0]?.variant).toBeUndefined()
+  })
+
+  it('omits variant for a multi-item cart even when items carry variant_id', async () => {
+    const db = openTestDb()
+    const now = 1_000_000
+    upsertMerchant(db, {
+      merchantId: 'merchant-1',
+      name: 'Test Merchant',
+      catalogUrl: 'https://my-store.myshopify.com/products.json',
+      catalogPrices: { 'sku-1': 150_000, 'sku-2': 150_000 },
+    })
+    const { settlementId } = makeApprovedSettlement(db, {
+      now,
+      expiresAt: now + 3600,
+      amountPaise: 300_000,
+      items: [
+        { sku: 'sku-1', qty: 1, unit_price_paise: 150_000, variant_id: 'variant-a' },
+        { sku: 'sku-2', qty: 1, unit_price_paise: 150_000, variant_id: 'variant-b' },
+      ],
+    })
+    const driver = makeScriptedDriver([captured()])
+
+    await runOnce({ ...baseRunnerDeps(db), driver, now: () => now }, settlementId)
+
+    expect(driver.calls[0]?.variant).toBeUndefined()
   })
 })
 

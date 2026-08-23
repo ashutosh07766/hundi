@@ -6,7 +6,7 @@
  * executor tests never touch the network or a browser.
  */
 
-import type { Credential, IntentMandate } from '@hundi/core'
+import type { CartItem, Credential, IntentMandate } from '@hundi/core'
 import { intentSigningBytes, sha256Hex } from '@hundi/core'
 import type Database from 'better-sqlite3'
 import { tx } from '../db/index.js'
@@ -66,7 +66,13 @@ export type ApprovedFixture = {
  */
 export function makeApprovedSettlement(
   db: Database.Database,
-  opts: { now: number; expiresAt: number; merchantId?: string; amountPaise?: number },
+  opts: {
+    now: number
+    expiresAt: number
+    merchantId?: string
+    amountPaise?: number
+    items?: CartItem[]
+  },
 ): ApprovedFixture {
   const merchantId = opts.merchantId ?? 'merchant-1'
   const amountPaise = opts.amountPaise ?? 100_000
@@ -83,7 +89,7 @@ export function makeApprovedSettlement(
   const cart = makeCart({
     agent,
     intent,
-    items: [{ sku: 'sku-1', qty: 1, unit_price_paise: amountPaise }],
+    items: opts.items ?? [{ sku: 'sku-1', qty: 1, unit_price_paise: amountPaise }],
     overrides: { merchant_id: merchantId, cartId: nextId('cart') },
   })
 
@@ -143,8 +149,8 @@ export function makeFakeRazorpay(
  * for any call beyond the scripted length. */
 export function makeScriptedDriver(
   results: SettleViaCheckoutResult[],
-): SettleDriver & { calls: { orderId: string; amountPaise: number }[] } {
-  const calls: { orderId: string; amountPaise: number }[] = []
+): SettleDriver & { calls: Parameters<SettleDriver['settleViaCheckout']>[0][] } {
+  const calls: Parameters<SettleDriver['settleViaCheckout']>[0][] = []
   return {
     calls,
     async settleViaCheckout(args) {

@@ -50,9 +50,19 @@ type SelectSuccess = {
   merchant_id: string
   reason: string
   via: 'llm' | 'fallback' | 'cheapest'
+  /** Present only when the LLM path resolved a specific variant (see
+   * chooseProduct's `chosen_variant_id`). The cheapest-fallback path never sets
+   * this — it has no size/color concept to reason about. */
+  chosen_variant_id?: string
+  variant_label?: string
 }
 
-function pickResponse(pick: FeedProduct, reason: string, via: SelectSuccess['via']): SelectSuccess {
+function pickResponse(
+  pick: FeedProduct,
+  reason: string,
+  via: SelectSuccess['via'],
+  variant?: { chosen_variant_id: string; variant_label?: string | undefined },
+): SelectSuccess {
   return {
     ok: true,
     chosen_sku: pick.id,
@@ -61,6 +71,8 @@ function pickResponse(pick: FeedProduct, reason: string, via: SelectSuccess['via
     merchant_id: pick.merchant_id,
     reason,
     via,
+    ...(variant ? { chosen_variant_id: variant.chosen_variant_id } : {}),
+    ...(variant?.variant_label ? { variant_label: variant.variant_label } : {}),
   }
 }
 
@@ -106,7 +118,14 @@ export function registerAgentRoutes(app: Hono, deps: AppDeps): void {
         ? `LLM pick unavailable (${choice.override_reason}); chose cheapest in-stock match under budget`
         : (choice.reason ?? 'LLM selection')
       return c.json(
-        pickResponse(choice.product, reason, choice.overridden ? 'fallback' : 'llm'),
+        pickResponse(
+          choice.product,
+          reason,
+          choice.overridden ? 'fallback' : 'llm',
+          choice.chosen_variant_id
+            ? { chosen_variant_id: choice.chosen_variant_id, variant_label: choice.variant_label }
+            : undefined,
+        ),
         200,
       )
     },

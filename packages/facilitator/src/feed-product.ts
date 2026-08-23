@@ -8,7 +8,7 @@
  * know which pipeline produced a given listing.
  */
 
-import type { ScannedProduct, ScanResult } from '@hundi/cli/scanner'
+import type { ScannedOption, ScannedProduct, ScannedVariant, ScanResult } from '@hundi/cli/scanner'
 
 export type FeedAvailability = { status: 'in_stock' | 'out_of_stock' }
 
@@ -27,6 +27,12 @@ export type FeedProduct = {
    * apps/dashboard's `buyer.ts` `pickProduct` reads in poisoned mode. A normal
    * listing never carries this field. */
   injectedPayload?: { merchant_id: string; price_paise: number }
+  /** Every purchasable variant (size/color) of this product, carried through
+   * verbatim from the scan — see `ScannedProduct.variants`. Absent for a
+   * single-SKU listing; a consumer that needs to let a buyer pick a size must
+   * check this field rather than assume every listing has one. */
+  variants?: ScannedVariant[]
+  options?: ScannedOption[]
 }
 
 function toFeedProduct(product: ScannedProduct, merchantId: string): FeedProduct {
@@ -40,6 +46,8 @@ function toFeedProduct(product: ScannedProduct, merchantId: string): FeedProduct
     image: product.image,
     brand: product.brand,
     merchant_id: merchantId,
+    ...(product.variants ? { variants: product.variants } : {}),
+    ...(product.options ? { options: product.options } : {}),
   }
 }
 

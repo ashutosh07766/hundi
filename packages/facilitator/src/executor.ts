@@ -27,7 +27,7 @@ import { tx } from './db/index.js'
 import type { Env } from './env.js'
 import { appendLedger } from './ledger.js'
 import { getMandateRow, intentFromRow } from './mandate-repo.js'
-import type { SettleViaCheckoutResult } from './rails/checkout-driver.js'
+import type { SettleViaCheckoutResult, VariantCartTarget } from './rails/checkout-driver.js'
 import type { RazorpayClient, RazorpayPaymentLink } from './razorpay-client.js'
 import { createRazorpayClient } from './razorpay-client.js'
 import { applyCapture } from './reconcile.js'
@@ -80,6 +80,7 @@ export interface SettleDriver {
   settleViaCheckout(args: {
     orderId: string
     amountPaise: number
+    variant?: VariantCartTarget
   }): Promise<SettleViaCheckoutResult>
 }
 
@@ -241,6 +242,37 @@ async function fallbackToPaymentLink(
 }
 
 /**
+ * Builds the checkout driver's variant-navigation target from the settlement's
+ * own signed cart, when applicable: exactly one line item, that item carries a
+ * `variant_id`, and the merchant has a `catalog_url` on file. A multi-item cart
+ * or a merchant with no recorded storefront origin resolves to `undefined` —
+ * the driver falls through to its existing local-checkout-page flow, unchanged.
+ */
+function resolveVariantTarget(
+  db: Database.Database,
+  settlement: SettlementRow,
+): VariantCartTarget | undefined {
+  const cart = JSON.parse(settlement.cart_json) as CartMandate
+  if (cart.items.length !== 1) return undefined
+  const item = cart.items[0]
+  if (!item?.variant_id) return undefined
+
+  const merchantRow = db
+    .prepare('SELECT catalog_url FROM merchants WHERE merchant_id = ?')
+    .get(settlement.merchant_id) as { catalog_url: string | null } | undefined
+  if (!merchantRow?.catalog_url) return undefined
+
+  let storeOrigin: string
+  try {
+    storeOrigin = new URL(merchantRow.catalog_url).origin
+  } catch {
+    return undefined
+  }
+
+  return { storeOrigin, variantId: item.variant_id, qty: item.qty }
+}
+
+/**
  * Drives `settlement` (already in `settling`) through up to MAX_ATTEMPTS
  * checkout-driver attempts, falling back to a payment link if all of them
  * fail. Counts attempts already on the row so a resumed settlement (see
@@ -252,6 +284,7 @@ async function runAttemptLoop(
   settlement: SettlementRow,
 ): Promise<ExecutionOutcome> {
   const settlementId = settlement.id
+  const variantTarget = resolveVariantTarget(deps.db, settlement)
   const existingAttempts = (
     deps.db
       .prepare(
@@ -314,6 +347,7 @@ async function runAttemptLoop(
     const driverResult = await deps.driver.settleViaCheckout({
       orderId: providerOrderId,
       amountPaise: settlement.amount_paise,
+      ...(variantTarget ? { variant: variantTarget } : {}),
     })
 
     if (driverResult.ok && driverResult.status === 'captured' && driverResult.paymentId) {

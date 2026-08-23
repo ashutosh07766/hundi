@@ -1,0 +1,14 @@
+**/node_modules/
+**/dist/
+**/*.db
+**/*.db-journal
+**/test-results/
+.git/
+.github/
+.githooks/
+.DS_Store
+.env
+.env.*
+!.env.example
+packages/facilitator/artifacts/
+spikes/checkout-driver/artifacts/

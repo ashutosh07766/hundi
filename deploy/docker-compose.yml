@@ -1,0 +1,37 @@
+# Run from anywhere: docker compose -f deploy/docker-compose.yml up --build
+# (context: .. resolves to the repo root regardless of cwd, since Compose
+# resolves relative paths against this file's own directory.)
+#
+# One container: the facilitator, with the demo store running inside it as a
+# second process (ENABLE_DEMO_STORE=true, see deploy/entrypoint.sh). This is
+# deliberate, not a simplification of convenience — both serve.ts and
+# apps/store/src/server.ts hardcode `hostname: '127.0.0.1'` with no env
+# override, and serve.ts's own DEMO_STORE_URL constant
+# (http://127.0.0.1:8791) assumes the store is reachable on that same
+# loopback. Splitting them into two Compose services on the default bridge
+# network would put them in different network namespaces and silently break
+# that assumption (each container gets its own 127.0.0.1) — see
+# deploy/README.md's "Finding" section for the full explanation. Set
+# ENABLE_DEMO_STORE=false below if you want to run the store yourself
+# instead (e.g. `docker exec` into a separate process) and manage its
+# lifecycle independently; it will still need to end up reachable at
+# 127.0.0.1:8791 *inside this same container* to satisfy that assumption.
+services:
+  facilitator:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    env_file:
+      - .env
+    environment:
+      DB_PATH: /data/hundi.db
+      PUBLIC_PORT: '8080'
+      # ENABLE_DEMO_STORE: 'false'
+    ports:
+      - '8080:8080'
+    volumes:
+      - hundi-data:/data
+    restart: unless-stopped
+
+volumes:
+  hundi-data:

@@ -23,6 +23,21 @@ import { signPayload } from './ed25519.js'
 
 export type Availability = { status: 'in_stock' | 'out_of_stock' }
 
+/** One purchasable SKU within a product (e.g. a specific size/color) — mirrors
+ * `ScannedVariant` in @hundi/cli's scanner.ts and `FeedProduct.variants` in
+ * packages/facilitator's feed-product.ts. This package doesn't depend on
+ * @hundi/cli, so the shape is duplicated rather than imported, same as `Product`
+ * itself already is relative to `FeedProduct`. */
+export type ProductVariant = {
+  variant_id: string
+  label: string
+  option_values: string[]
+  price_paise: number
+  available: boolean
+}
+
+export type ProductOption = { name: string; values: string[] }
+
 /** The shape the store's /api/catalog and /api/products/:id feeds emit — see
  * apps/store/src/app.ts's toFeedProduct. */
 export type Product = {
@@ -40,6 +55,10 @@ export type Product = {
    * genuine listing; a normal brain has no reason to ever read this field, since `merchant_id`
    * and `price_paise` above are always the store's own real values regardless. */
   injectedPayload?: { merchant_id: string; price_paise: number }
+  /** Every purchasable variant, present only for a multi-variant listing. Absent
+   * for a single-SKU product. */
+  variants?: ProductVariant[]
+  options?: ProductOption[]
 }
 
 export type CartDraft = {
@@ -85,10 +104,20 @@ const POLL_STOP_STATES: ReadonlySet<SettlementState> = new Set([
   'abandoned',
 ])
 
+export type CartLineInput = {
+  product: Product
+  qty: number
+  /** Selects a specific variant (size/color) off `product.variants`. The line's
+   * signed price comes from the variant's own `price_paise`, not the product's —
+   * see `buildCartDraft`. Omit to buy the product with no variant recorded, the
+   * same as before variants existed. */
+  variantId?: string
+}
+
 export interface BuyerTools {
   searchCatalog(query?: string): Promise<Product[]>
   getProduct(id: string): Promise<Product>
-  proposeCart(items: ReadonlyArray<{ product: Product; qty: number }>): CartDraft
+  proposeCart(items: ReadonlyArray<CartLineInput>): CartDraft
   requestPayment(args: {
     intent: IntentMandate
     cart: CartDraft
@@ -105,17 +134,32 @@ export interface BuyerTools {
 
 /** Pure — no I/O. Sums line items from already-fetched Product data; every buyer
  * brain builds its cart through this so price/total math lives in exactly one
- * place, taken from the catalog response, never invented client-side. */
-export function buildCartDraft(items: ReadonlyArray<{ product: Product; qty: number }>): CartDraft {
+ * place, taken from the catalog response, never invented client-side. When a
+ * line carries `variantId`, the unit price and `variant_label` come from that
+ * variant's own catalog data (never the product's flat `price_paise`) — this is
+ * what makes a selected variant's price authoritative rather than assumed. */
+export function buildCartDraft(items: ReadonlyArray<CartLineInput>): CartDraft {
   const first = items[0]
   if (!first) throw new Error('buildCartDraft: at least one item is required')
   const merchantId = first.product.merchant_id
 
-  const cartItems: CartItem[] = items.map(({ product, qty }) => {
+  const cartItems: CartItem[] = items.map(({ product, qty, variantId }) => {
     if (product.merchant_id !== merchantId) {
       throw new Error('buildCartDraft: all items must share one merchant_id')
     }
-    return { sku: product.id, qty, unit_price_paise: product.price_paise }
+    if (!variantId) return { sku: product.id, qty, unit_price_paise: product.price_paise }
+
+    const variant = product.variants?.find((v) => v.variant_id === variantId)
+    if (!variant) {
+      throw new Error(`buildCartDraft: variant "${variantId}" not found on product "${product.id}"`)
+    }
+    return {
+      sku: product.id,
+      qty,
+      unit_price_paise: variant.price_paise,
+      variant_id: variant.variant_id,
+      variant_label: variant.label,
+    }
   })
   const total_paise = cartItems.reduce((sum, item) => sum + item.qty * item.unit_price_paise, 0)
   return { merchant_id: merchantId, items: cartItems, total_paise }

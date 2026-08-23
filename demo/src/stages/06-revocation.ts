@@ -32,7 +32,7 @@ export type Stage6Detail = {
 export async function runStage6(h: DemoHarness): Promise<StageRun<Stage6Detail>> {
   h.driverController.mode = 'captured'
 
-  const { intent, agentKeyPair } = await registerMandate({
+  const { intent, agentKeyPair, humanKeyPair } = await registerMandate({
     facilitatorUrl: h.facilitatorUrl,
     dashboardToken: DASHBOARD_TOKEN,
     goal: 'buy running shoes, revoked mid-session',
@@ -61,7 +61,8 @@ export async function runStage6(h: DemoHarness): Promise<StageRun<Stage6Detail>>
     throw new Error(`stage 6: expected the first purchase to complete, got ${first.status}`)
   }
 
-  const sig = signRevoke(agentKeyPair, intent.mandateId)
+  // Revocation is a human authority — signed by the registered (human) credential.
+  const sig = signRevoke(humanKeyPair, intent.mandateId)
   const revokeResult = await postRevoke(h.facilitatorUrl, { mandateId: intent.mandateId, sig })
   if (!revokeResult.ok) {
     throw new Error(`stage 6: revoke call failed: ${revokeResult.error ?? 'unknown'}`)

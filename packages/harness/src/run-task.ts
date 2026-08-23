@@ -70,7 +70,7 @@ function setDriverMode(h: BatchHarness, task: Task): void {
 async function runPurchaseTask(h: BatchHarness, task: PurchaseTask): Promise<TaskActual> {
   setDriverMode(h, task)
 
-  const { intent, agentKeyPair } = await registerMandate({
+  const { intent, agentKeyPair, humanKeyPair } = await registerMandate({
     facilitatorUrl: h.facilitatorUrl,
     dashboardToken: DASHBOARD_TOKEN,
     goal: task.narration,
@@ -111,7 +111,9 @@ async function runPurchaseTask(h: BatchHarness, task: PurchaseTask): Promise<Tas
     }
     const fetched = await getSettlement(h.facilitatorUrl, settlementId)
     const mandateCartHashHex = fetched.settlement.mandate_cart_hash_hex
-    const sig = signApprovalDecision(agentKeyPair, {
+    // Approvals are verified against the registered (human) credential — the
+    // agent key that signed the cart cannot approve its own settlement.
+    const sig = signApprovalDecision(humanKeyPair, {
       settlementId,
       mandateCartHashHex,
       decision: task.decision,

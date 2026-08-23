@@ -247,16 +247,12 @@ export async function postRevoke(
 
 /** Signs the exact byte shape POST /approvals verifies (routes/approvals.ts):
  * `canonicalJson({ settlement_id, mandate_cart_hash_hex, decision })`. The
- * registered credential is the same ed25519 key bound at ceremony time (see
- * session.ts's registerMandate) — no separate WebAuthn human passkey exists
- * yet, so "the human's key" and "the agent's key" are the same bits here.
- * The route itself already verifies against the mandate's *registered
- * credential*, not the agent's operational key by name — swapping in a real
- * passkey ceremony later requires no server-side change, only a different
- * signer.
- */
+ * route verifies this against the mandate's *registered credential* — the human
+ * key bound at ceremony time (session.ts's registerMandate) — so `signer` must
+ * be the human keypair, not the agent key. The agent key cannot produce a valid
+ * approval; that separation is the human-in-the-loop gate's second factor. */
 export function signApprovalDecision(
-  agent: AgentKeypair,
+  signer: AgentKeypair,
   args: { settlementId: string; mandateCartHashHex: string; decision: 'approved' | 'rejected' },
 ): SigEnvelope {
   const bytes = canonicalJson({
@@ -264,15 +260,16 @@ export function signApprovalDecision(
     mandate_cart_hash_hex: args.mandateCartHashHex,
     decision: args.decision,
   })
-  return signPayload(agent.privateKey, bytes)
+  return signPayload(signer.privateKey, bytes)
 }
 
 /** Signs the exact byte shape POST /revoke verifies (routes/revoke.ts):
- * `canonicalJson({ mandateId, action: 'revoke' })`. Same registered-credential
- * note as signApprovalDecision applies. */
-export function signRevoke(agent: AgentKeypair, mandateId: string): SigEnvelope {
+ * `canonicalJson({ mandateId, action: 'revoke' })`. Verified against the
+ * registered (human) credential — pass the human keypair, same as
+ * signApprovalDecision. */
+export function signRevoke(signer: AgentKeypair, mandateId: string): SigEnvelope {
   const bytes = canonicalJson({ mandateId, action: 'revoke' })
-  return signPayload(agent.privateKey, bytes)
+  return signPayload(signer.privateKey, bytes)
 }
 
 export type { RazorpayClient }

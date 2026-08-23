@@ -150,7 +150,7 @@ describe('scripted brain — happy path', () => {
     const { url: facilitatorUrl, db } = await bootFacilitator()
     const tools: BuyerTools = new HttpBuyerTools({ storeUrl: store.url, facilitatorUrl })
 
-    const { intent, agentKeyPair } = await registerMandate({
+    const { intent, agentKeyPair, humanKeyPair } = await registerMandate({
       facilitatorUrl,
       dashboardToken: TEST_ENV.DASHBOARD_TOKEN,
       goal: 'buy running shoes',
@@ -160,13 +160,16 @@ describe('scripted brain — happy path', () => {
       expires_at: future(),
     })
 
-    // Cross-verifies the signature this package produced against core's own
-    // verifier — proves ed25519.ts is genuinely compatible, not just accepted by
-    // a facilitator that happens to make the same mistake.
+    // The intent is signed by the HUMAN key (the registered credential), while
+    // the agent key it attests is a distinct party. Cross-verifies the human
+    // signature against core's own verifier — proves ed25519.ts is genuinely
+    // compatible — and confirms the two keys really are different.
+    expect(humanKeyPair.publicKeyHex).not.toBe(agentKeyPair.publicKeyHex)
+    expect(intent.agent_pubkey_hex).toBe(agentKeyPair.publicKeyHex)
     expect(
       verifyMandateSignature(intentSigningBytes(intent), intent.sig, {
         type: 'ed25519',
-        publicKey_hex: agentKeyPair.publicKeyHex,
+        publicKey_hex: humanKeyPair.publicKeyHex,
       }),
     ).toBe(true)
 

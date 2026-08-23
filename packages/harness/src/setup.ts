@@ -230,15 +230,13 @@ export async function postApproval(
 }
 
 /** Signs the exact byte shape POST /approvals verifies (routes/approvals.ts):
- * `canonicalJson({ settlement_id, mandate_cart_hash_hex, decision })`. The
- * registered credential is the same ed25519 key bound at ceremony time — no
- * separate WebAuthn human passkey exists yet, so "the human's key" and "the
- * agent's key" are the same bits here. The route itself already verifies
- * against the mandate's *registered credential*, not the agent's operational
- * key by name — swapping in a real passkey ceremony later requires no
- * server-side change, only a different signer. */
+ * `canonicalJson({ settlement_id, mandate_cart_hash_hex, decision })`. The route
+ * verifies this against the mandate's *registered credential* — the human key
+ * bound at ceremony time — so `signer` must be the human keypair. The agent key
+ * that built the cart cannot produce a valid approval; that is the gate's second
+ * factor. */
 export function signApprovalDecision(
-  agent: AgentKeypair,
+  signer: AgentKeypair,
   args: { settlementId: string; mandateCartHashHex: string; decision: 'approved' | 'rejected' },
 ): SigEnvelope {
   const bytes = canonicalJson({
@@ -246,5 +244,5 @@ export function signApprovalDecision(
     mandate_cart_hash_hex: args.mandateCartHashHex,
     decision: args.decision,
   })
-  return signPayload(agent.privateKey, bytes)
+  return signPayload(signer.privateKey, bytes)
 }

@@ -1,9 +1,16 @@
 /**
  * Mandate registration for the demo/test harness — the scripted-issuance path:
- * mint a ceremony token with the dashboard token, then register an agent-signed
+ * mint a ceremony token with the dashboard token, then register a human-signed
  * IntentMandate against it. This stands in for the passkey ceremony a human would
  * otherwise perform in the dashboard; nothing here reaches a code path a caller
  * without the dashboard token could also reach.
+ *
+ * Two distinct keys, two distinct parties (matching docs/rfc.md and the core
+ * verify gate): the HUMAN key signs the intent and is registered as the mandate's
+ * credential — it later signs approvals and revocations. The AGENT key is embedded
+ * in the human-signed intent as `agent_pubkey_hex` (so the human attests it) and
+ * signs carts and decision narration, nothing else. Callers get both keypairs
+ * back: the agent key to sign carts, the human key to approve/revoke.
  */
 
 import { randomUUID } from 'node:crypto'
@@ -21,23 +28,30 @@ export type RegisterMandateArgs = {
   merchants: string[]
   /** Unix seconds. */
   expires_at: number
-  /** Reuses an existing identity instead of minting a fresh one — mostly for tests
-   * that need to assert against a known public key. */
+  /** Reuses an existing agent identity (the cart signer) instead of minting a
+   * fresh one — mostly for tests that need to assert against a known public key. */
   agent?: AgentKeypair
+  /** Reuses an existing human identity (the intent/approval/revoke signer)
+   * instead of minting a fresh one. */
+  human?: AgentKeypair
 }
 
 export type RegisteredMandate = {
   mandateId: string
   intent: IntentMandate
+  /** Signs carts and decision narration. Embedded as `intent.agent_pubkey_hex`. */
   agentKeyPair: AgentKeypair
+  /** The registered credential — signs the intent, approvals, and revocations. */
+  humanKeyPair: AgentKeypair
 }
 
-/** Runs the full ceremony (mint token, sign intent, register) and returns the
- * registered mandate plus the agent keypair that authorizes every subsequent
- * cart signed against it. */
+/** Runs the full ceremony (mint token, human-sign intent, register the human
+ * credential) and returns the registered mandate plus both keypairs — the agent
+ * key that authorizes carts and the human key that authorizes approvals/revokes. */
 export async function registerMandate(args: RegisterMandateArgs): Promise<RegisteredMandate> {
   const base = args.facilitatorUrl.replace(/\/$/, '')
   const agent = args.agent ?? generateAgentKeypair()
+  const human = args.human ?? generateAgentKeypair()
 
   const tokenRes = await fetch(`${base}/ceremony-tokens`, {
     method: 'POST',
@@ -58,7 +72,7 @@ export async function registerMandate(args: RegisterMandateArgs): Promise<Regist
     expires_at: args.expires_at,
     agent_pubkey_hex: agent.publicKeyHex,
   }
-  const sig = signPayload(agent.privateKey, intentSigningBytes(unsigned))
+  const sig = signPayload(human.privateKey, intentSigningBytes(unsigned))
   const intent: IntentMandate = { ...unsigned, sig }
 
   const registerRes = await fetch(`${base}/mandates`, {
@@ -66,7 +80,7 @@ export async function registerMandate(args: RegisterMandateArgs): Promise<Regist
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       intent,
-      credential: { type: 'ed25519', publicKey_hex: agent.publicKeyHex },
+      credential: { type: 'ed25519', publicKey_hex: human.publicKeyHex },
       ceremonyToken,
     }),
   })
@@ -75,5 +89,5 @@ export async function registerMandate(args: RegisterMandateArgs): Promise<Regist
     | { ok: false; error: string }
   if (!body.ok) throw new Error(`registerMandate: mandate registration failed: ${body.error}`)
 
-  return { mandateId: body.mandateId, intent, agentKeyPair: agent }
+  return { mandateId: body.mandateId, intent, agentKeyPair: agent, humanKeyPair: human }
 }

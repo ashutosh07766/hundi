@@ -40,10 +40,10 @@ type SubflowResult = {
   events: string[]
 }
 
-type GatedCart = { settlementId: string; agentKeyPair: AgentKeypair }
+type GatedCart = { settlementId: string; humanKeyPair: AgentKeypair }
 
 async function submitGatedCart(h: DemoHarness, goalLabel: string): Promise<GatedCart> {
-  const { intent, agentKeyPair } = await registerMandate({
+  const { intent, agentKeyPair, humanKeyPair } = await registerMandate({
     facilitatorUrl: h.facilitatorUrl,
     dashboardToken: DASHBOARD_TOKEN,
     goal: goalLabel,
@@ -71,14 +71,14 @@ async function submitGatedCart(h: DemoHarness, goalLabel: string): Promise<Gated
   if (outcome.status !== 'pending_approval') {
     throw new Error(`stage 3: expected pending_approval, got ${outcome.status}`)
   }
-  return { settlementId: outcome.settlement.settlement_id, agentKeyPair }
+  return { settlementId: outcome.settlement.settlement_id, humanKeyPair }
 }
 
 async function runDecisionSubflow(
   h: DemoHarness,
   decision: 'approved' | 'rejected',
 ): Promise<SubflowResult> {
-  const { settlementId, agentKeyPair } = await submitGatedCart(
+  const { settlementId, humanKeyPair } = await submitGatedCart(
     h,
     `buy a shoe near the approval threshold (human will ${decision})`,
   )
@@ -86,7 +86,9 @@ async function runDecisionSubflow(
   const fetched = await getSettlement(h.facilitatorUrl, settlementId)
   const mandateCartHashHex = fetched.settlement.mandate_cart_hash_hex
 
-  const sig = signApprovalDecision(agentKeyPair, { settlementId, mandateCartHashHex, decision })
+  // The gate's second factor: only the human key (the registered credential)
+  // can sign a valid decision — the agent key that built the cart cannot.
+  const sig = signApprovalDecision(humanKeyPair, { settlementId, mandateCartHashHex, decision })
   await postApproval(h.facilitatorUrl, {
     settlement_id: settlementId,
     mandate_cart_hash_hex: mandateCartHashHex,

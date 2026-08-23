@@ -35,15 +35,6 @@ const IFRAME_SELECTORS = ['iframe.razorpay-checkout-frame', 'iframe[src*="razorp
 // when the first pick is flagged that way on a given run.
 const NETBANK_CANDIDATES = ['Canara Bank', 'Punjab National Bank - Retail Banking', 'IDBI']
 
-/** Points the driver at a merchant's real Shopify cart permalink for a specific
- * variant instead of this process's own locally-hosted checkout-page host. */
-export interface VariantCartTarget {
-  /** The merchant's storefront origin (e.g. "https://my-store.myshopify.com"). */
-  storeOrigin: string
-  variantId: string
-  qty: number
-}
-
 export interface SettleViaCheckoutArgs {
   orderId: string
   amountPaise: number
@@ -55,30 +46,15 @@ export interface SettleViaCheckoutArgs {
   /** Which button to click on Razorpay's mock bank page. Defaults to 'success' — a
    * real settle attempt never asks for 'failure'; it exists for driver-level tests. */
   outcome?: 'success' | 'failure'
-  /** When present, the browser's first navigation goes to this variant's Shopify
-   * cart permalink (`{storeOrigin}/cart/{variantId}:{qty}`) instead of this
-   * process's own locally-hosted checkout-page host — Shopify adds exactly that
-   * variant to the cart and proceeds to its own checkout, so the merchant's order
-   * records the chosen size/color. Every selector and timeout downstream is
-   * unchanged: Razorpay's checkout.js overlay (iframe, Netbanking tab, mock-bank
-   * buttons) renders identically regardless of which page embeds it, so the same
-   * driving logic applies whether the embed is this process's local host page or
-   * the merchant's real storefront. Absent → the existing local-host flow, byte-
-   * for-byte unchanged. */
-  variant?: VariantCartTarget
-}
-
-/** Pure — builds the Shopify variant cart permalink `settleViaCheckout` navigates
- * to when `args.variant` is present. Exported so the URL construction is testable
- * without driving a real (or mocked) browser through the full checkout flow. */
-export function buildVariantCartUrl(variant: VariantCartTarget): string {
-  const origin = variant.storeOrigin.replace(/\/$/, '')
-  return `${origin}/cart/${encodeURIComponent(variant.variantId)}:${variant.qty}`
 }
 
 /** Pure — builds the URL to this process's own locally-hosted checkout-page host
- * (see checkout-page.ts), the non-variant navigation target. Exported for the same
- * testability reason as `buildVariantCartUrl`. */
+ * (see checkout-page.ts). This driver only ever embeds Razorpay's TEST-mode
+ * checkout.js overlay on that local host: it never navigates to a merchant's real
+ * storefront. The variant the human authorized is carried in the signed cart and
+ * the ledger, not driven through this test-mode payment robot — pointing this
+ * robot at a live store would neither render Razorpay's overlay nor stay in test
+ * mode. Exported so the URL construction is testable without driving a browser. */
 export function buildLocalCheckoutUrl(args: {
   orderId: string
   amountPaise: number
@@ -311,17 +287,12 @@ export function createCheckoutDriver(config: CheckoutDriverConfig): CheckoutDriv
       let page: Page | undefined
 
       try {
-        // The local checkout-page host is only needed for the non-variant path — a
-        // variant navigation goes straight to the merchant's own storefront, so
-        // starting it in that branch would be pure overhead with nothing to serve.
-        const url = args.variant
-          ? buildVariantCartUrl(args.variant)
-          : buildLocalCheckoutUrl({
-              orderId: args.orderId,
-              amountPaise: args.amountPaise,
-              keyId: config.keyId,
-              port: (await getCheckoutPageServer(port)).port,
-            })
+        const url = buildLocalCheckoutUrl({
+          orderId: args.orderId,
+          amountPaise: args.amountPaise,
+          keyId: config.keyId,
+          port: (await getCheckoutPageServer(port)).port,
+        })
 
         browser = await chromium.launch({ headless: true })
         const context = await browser.newContext({ viewport: { width: 1280, height: 720 } })

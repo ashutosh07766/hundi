@@ -48,43 +48,12 @@ vi.mock('../rails/checkout-page.js', () => ({
   startCheckoutPageServer: startCheckoutPageServerMock,
 }))
 
-const { createCheckoutDriver, buildLocalCheckoutUrl, buildVariantCartUrl } = await import(
-  '../rails/checkout-driver.js'
-)
+const { createCheckoutDriver, buildLocalCheckoutUrl } = await import('../rails/checkout-driver.js')
 const { makeFakeRazorpay } = await import('./executor-helpers.js')
 
 beforeEach(() => {
   gotoCalls.length = 0
   startCheckoutPageServerMock.mockClear()
-})
-
-describe('buildVariantCartUrl — pure', () => {
-  it('builds a Shopify variant cart permalink', () => {
-    const url = buildVariantCartUrl({
-      storeOrigin: 'https://my-store.myshopify.com',
-      variantId: '1002',
-      qty: 1,
-    })
-    expect(url).toBe('https://my-store.myshopify.com/cart/1002:1')
-  })
-
-  it('trims a trailing slash on storeOrigin', () => {
-    const url = buildVariantCartUrl({
-      storeOrigin: 'https://my-store.myshopify.com/',
-      variantId: '1002',
-      qty: 2,
-    })
-    expect(url).toBe('https://my-store.myshopify.com/cart/1002:2')
-  })
-
-  it('encodes a variant id containing special characters', () => {
-    const url = buildVariantCartUrl({
-      storeOrigin: 'https://my-store.myshopify.com',
-      variantId: 'weird/id with space',
-      qty: 1,
-    })
-    expect(url).toBe('https://my-store.myshopify.com/cart/weird%2Fid%20with%20space:1')
-  })
 })
 
 describe('buildLocalCheckoutUrl — pure', () => {
@@ -101,26 +70,8 @@ describe('buildLocalCheckoutUrl — pure', () => {
   })
 })
 
-describe('settleViaCheckout — initial navigation branch', () => {
-  it('navigates to the variant cart permalink and never starts the local checkout-page host when a variant is present', async () => {
-    const driver = createCheckoutDriver({
-      keyId: 'rzp_test_key',
-      keySecret: 'secret',
-      razorpay: makeFakeRazorpay(),
-      checkoutPagePort: 9001,
-    })
-
-    await driver.settleViaCheckout({
-      orderId: 'order_1',
-      amountPaise: 320000,
-      variant: { storeOrigin: 'https://my-store.myshopify.com', variantId: '1002', qty: 1 },
-    })
-
-    expect(gotoCalls).toEqual(['https://my-store.myshopify.com/cart/1002:1'])
-    expect(startCheckoutPageServerMock).not.toHaveBeenCalled()
-  })
-
-  it('navigates to the local checkout-page host when no variant is present (unchanged flow)', async () => {
+describe('settleViaCheckout — initial navigation', () => {
+  it('navigates to the local checkout-page host that embeds Razorpay test checkout — never a merchant storefront', async () => {
     const driver = createCheckoutDriver({
       keyId: 'rzp_test_key',
       keySecret: 'secret',

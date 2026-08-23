@@ -8,7 +8,7 @@
  * every other buyer brain.
  */
 
-import type { IntentMandate } from '@hundi/core'
+import type { IntentMandate, MandateWalletState } from '@hundi/core'
 import type { Product } from '../../../agents/scripted-brain/src/agent-tools.js'
 
 export type StoreListItem = {
@@ -28,7 +28,7 @@ export type MandateRecord = {
    * subtraction (which silently drifts the moment the spend model changes). */
   spentPaise: number
   remainingPaise: number
-  state: 'active' | 'consumed' | 'expired' | 'revoked'
+  state: MandateWalletState
 }
 
 export type SettlementAttempt = {
@@ -132,9 +132,9 @@ export function createFacilitatorClient(facilitatorUrl: string): FacilitatorClie
         intent_json: string
         revoked_at: number | null
         created_at: number
-        spent_paise: number
-        remaining_paise: number
-        state: 'active' | 'consumed' | 'expired' | 'revoked'
+        spent_paise: number | null
+        remaining_paise: number | null
+        state: MandateWalletState
       }
       const { mandates } = await getEnvelope<{ ok: true; mandates: Row[] }>('/mandates')
       return mandates.map((row) => ({
@@ -142,8 +142,10 @@ export function createFacilitatorClient(facilitatorUrl: string): FacilitatorClie
         intent: JSON.parse(row.intent_json) as IntentMandate,
         revoked: row.revoked_at !== null,
         createdAt: row.created_at,
-        spentPaise: row.spent_paise,
-        remainingPaise: row.remaining_paise,
+        // A state:'error' row (unparseable stored intent) carries null accounting;
+        // surface 0 rather than propagate null — the 'error' state is the signal.
+        spentPaise: row.spent_paise ?? 0,
+        remainingPaise: row.remaining_paise ?? 0,
         state: row.state,
       }))
     },

@@ -1,7 +1,13 @@
 export type { CanonicalValue } from './canonical-json.js'
 export { canonicalJson } from './canonical-json.js'
 export { decodeBase64Url, sha256B64url, sha256Hex } from './hash.js'
-export type { CartItem, CartMandate, IntentMandate, SigEnvelope } from './mandate.js'
+export type {
+  CartItem,
+  CartMandate,
+  IntentMandate,
+  MandateWalletState,
+  SigEnvelope,
+} from './mandate.js'
 export { cartSigningBytes, intentSigningBytes } from './mandate.js'
 export type { Credential } from './signature.js'
 export { verifyMandateSignature } from './signature.js'

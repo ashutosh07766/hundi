@@ -652,7 +652,7 @@ describe('request_purchase — variant resolution, max price, idempotency', () =
     expect(state.createSettlementCalls).toHaveLength(0)
   })
 
-  it('uses a deterministic Idempotency-Key for identical purchases so a retry dedupes', async () => {
+  it('gives two identical purchases (no token) DISTINCT keys and carts, so a repeat buy settles independently', async () => {
     const { intent } = makeSignedIntent({ agent })
     const state = capturedState(intent)
     const { server } = buildServer(state, agent)
@@ -668,9 +668,73 @@ describe('request_purchase — variant resolution, max price, idempotency', () =
     await client.callTool({ name: 'request_purchase', arguments: args })
     await client.callTool({ name: 'request_purchase', arguments: args })
 
+    // Without an idempotency_token, a repeat purchase of the same item is a NEW
+    // purchase — distinct keys and distinct signed carts, so it does not replay
+    // the first as a fake success.
     expect(state.createSettlementCalls).toHaveLength(2)
+    expect(state.createSettlementCalls[0]?.idempotencyKey).not.toBe(
+      state.createSettlementCalls[1]?.idempotencyKey,
+    )
+    expect(state.createSettlementCalls[0]?.cart.cartId).not.toBe(
+      state.createSettlementCalls[1]?.cart.cartId,
+    )
+  })
+
+  it('reuses the key + cart across calls that share an idempotency_token, so a true retry dedupes', async () => {
+    const { intent } = makeSignedIntent({ agent })
+    const state = capturedState(intent)
+    const { server } = buildServer(state, agent)
+    const client = await connectedClient(server)
+    const args = {
+      merchant_id: 'demo-store-1',
+      sku: 'sneaker',
+      qty: 1,
+      mandate_id: intent.mandateId,
+      variant_id: 'v-black-11',
+      idempotency_token: 'attempt-abc',
+    }
+
+    await client.callTool({ name: 'request_purchase', arguments: args })
+    await client.callTool({ name: 'request_purchase', arguments: args })
+
+    // Same token → identical Idempotency-Key and identical cart id, so a real
+    // facilitator replays the first response rather than charging twice.
     expect(state.createSettlementCalls[0]?.idempotencyKey).toBe(
       state.createSettlementCalls[1]?.idempotencyKey,
     )
+    expect(state.createSettlementCalls[0]?.cart.cartId).toBe(
+      state.createSettlementCalls[1]?.cart.cartId,
+    )
+  })
+
+  it('makes the token key price-independent, so a retry after a catalog price move still dedupes', async () => {
+    const { intent } = makeSignedIntent({ agent })
+    const state = capturedState(intent)
+    const { server } = buildServer(state, agent)
+    const client = await connectedClient(server)
+    const args = {
+      merchant_id: 'demo-store-1',
+      sku: 'sneaker',
+      qty: 1,
+      mandate_id: intent.mandateId,
+      variant_id: 'v-black-11',
+      idempotency_token: 'attempt-xyz',
+    }
+
+    await client.callTool({ name: 'request_purchase', arguments: args })
+    const keyBefore = state.createSettlementCalls[0]?.idempotencyKey
+
+    // Catalog price ticks up between the purchase and its retry.
+    const bumped = sneaker()
+    bumped.price_paise = 459_900
+    for (const v of bumped.variants ?? []) v.price_paise = 459_900
+    state.catalogs = { 'demo-store-1': [bumped] }
+
+    await client.callTool({ name: 'request_purchase', arguments: args })
+    const keyAfter = state.createSettlementCalls[1]?.idempotencyKey
+
+    // Key is derived from the token, not the (now-changed) cart bytes, so the
+    // retry still carries the original key and dedupes instead of double-charging.
+    expect(keyAfter).toBe(keyBefore)
   })
 })

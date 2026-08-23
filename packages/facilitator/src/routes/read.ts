@@ -1,3 +1,4 @@
+import type { MandateWalletState } from '@hundi/core'
 import type { Hono } from 'hono'
 import type { AppDeps } from '../app.js'
 import { RouteError } from '../errors.js'
@@ -98,10 +99,19 @@ export function registerReadRoutes(app: Hono, { db }: AppDeps): void {
     const CLOCK_SKEW_SEC = 60
 
     const enriched = mandates.map((row) => {
-      const intent = JSON.parse(row.intent_json) as { ceiling_paise: number; expires_at: number }
+      // Defense-in-depth: intent_json is Zod-validated at registration, but a
+      // corrupted or hand-edited row must not 500 the whole listing (and blind
+      // get_agent_identity to every other mandate). A bad row is reported with
+      // state 'error' and no accounting, not omitted silently.
+      let intent: { ceiling_paise: number; expires_at: number }
+      try {
+        intent = JSON.parse(row.intent_json) as { ceiling_paise: number; expires_at: number }
+      } catch {
+        return { ...row, spent_paise: null, remaining_paise: null, state: 'error' as const }
+      }
       const spentPaise = spentByMandate.get(row.mandate_id) ?? 0
       const remainingPaise = Math.max(0, intent.ceiling_paise - spentPaise)
-      const state: 'active' | 'consumed' | 'expired' | 'revoked' =
+      const state: MandateWalletState =
         row.revoked_at != null
           ? 'revoked'
           : now > intent.expires_at + CLOCK_SKEW_SEC

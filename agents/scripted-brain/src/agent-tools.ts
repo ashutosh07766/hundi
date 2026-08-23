@@ -129,6 +129,14 @@ export interface BuyerTools {
     intent: IntentMandate
     cart: CartDraft
     agent: AgentKeypair
+    /** Idempotency-Key for POST /settlements. A caller sets this to a token it
+     * holds stable ONLY across a retry of one purchase attempt (and regenerates
+     * for a new purchase) so a retry replays the first response instead of
+     * charging again. Deliberately NOT derived from the cart: the cart's price
+     * can move between a purchase and its retry, so a cart-derived key would miss
+     * the retry and double-charge. Omitted -> a fresh random key per call, so two
+     * distinct purchases (even of the same item) each settle independently. */
+    idempotencyKey?: string
   }): Promise<SettlementResult>
   /** Appends the brain's own stated rationale to a settlement's ledger trail, signed
    * by the agent's key. Never touches money or settlement state. */
@@ -271,15 +279,15 @@ export class HttpBuyerTools implements BuyerTools {
     intent: IntentMandate
     cart: CartDraft
     agent: AgentKeypair
+    idempotencyKey?: string
   }): Promise<SettlementResult> {
     const cart = signCart(args.cart, args.intent, args.agent)
 
-    // Deterministic idempotency key: the hash of this cart's own signing bytes.
-    // Resubmitting the identical signed cart (e.g. a retry after an ambiguous
-    // network failure) reuses the key, so the facilitator replays the first
-    // response instead of creating a second settlement. A random key here would
-    // make every retry look new — the exact double-charge risk on a payment path.
-    const idempotencyKey = sha256Hex(cartSigningBytes(cart))
+    // The caller owns retry identity (see the interface doc). A supplied key is a
+    // stable-across-retries token; absent, a fresh random key means each call is a
+    // new purchase. The key is NOT derived from the cart, so a price move between
+    // a purchase and its retry can't defeat the dedup.
+    const idempotencyKey = args.idempotencyKey ?? randomUUID()
     const res = await fetch(`${this.facilitatorUrl}/settlements`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },

@@ -56,6 +56,14 @@ export type CartItem = {
   variant_label?: string | undefined
 }
 
+/** The derived lifecycle state of a mandate treated as a cumulative wallet, as
+ * reported by the facilitator's read endpoints. Not a signed field — computed
+ * from captured spend vs ceiling, expiry, and revocation. Shared here so the
+ * facilitator and every client agree on the exact set of states. `error` is the
+ * read-path's defense-in-depth value for a row whose stored intent can't be
+ * parsed; it never describes a live mandate. */
+export type MandateWalletState = 'active' | 'consumed' | 'expired' | 'revoked' | 'error'
+
 /** A concrete purchase the agent is proposing, chained to its authorizing intent by hash. */
 export type CartMandate = {
   cartId: string

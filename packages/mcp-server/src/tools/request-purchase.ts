@@ -259,10 +259,23 @@ export function registerRequestPurchaseTool(
           .positive()
           .optional()
           .describe(
-            'Optional upper bound (in paise) on the cart total you are willing to spend — pass ' +
-              'the exact figure you quoted the user. If the fresh catalog total exceeds it, the ' +
-              'purchase is refused before signing, so a price that moved between your quote and ' +
-              "this call can't capture silently.",
+            'Optional agent-side upper bound (in paise) on the cart total — pass the exact figure ' +
+              'you quoted the user. If the fresh catalog total exceeds it, this tool refuses before ' +
+              'signing. Note this is a guard on purchases made through this tool, not a facilitator ' +
+              'rule; the facilitator separately rejects any price that disagrees with its catalog.',
+          ),
+        idempotency_token: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Retry-safety token. OMIT for a new purchase — including buying the same item again ' +
+              '(each omitted call settles independently). Only when RETRYING one purchase after an ' +
+              'ambiguous failure (a timeout, a lost response), call again with the SAME token you ' +
+              'would generate once for that attempt: the facilitator then replays the first result ' +
+              'instead of charging twice. Reusing a token for a genuinely new purchase would make ' +
+              'that purchase silently replay the earlier one, so never share a token across ' +
+              'distinct purchases.',
           ),
       },
     },
@@ -276,6 +289,7 @@ export function registerRequestPurchaseTool(
       variant,
       variant_id,
       max_price_paise,
+      idempotency_token,
     }) => {
       const mandates = await deps.facilitatorClient.listMandates()
       const record = findAuthorizedMandate(
@@ -297,19 +311,22 @@ export function registerRequestPurchaseTool(
         })
       }
 
-      // Deterministic cart id derived from the purchase intent, so an agent that
-      // retries the SAME purchase (e.g. after an ambiguous timeout) produces a
-      // byte-identical signed cart → identical Idempotency-Key → the facilitator
-      // replays the first response instead of charging twice. Two genuinely
-      // different purchases (different sku/variant/qty/mandate) get distinct ids.
-      const cartId = sha256Hex(
-        canonicalJson({
-          mandate_id,
-          sku,
-          qty,
-          variant_id: resolution.variant?.variant_id ?? null,
-        }),
-      )
+      // Retry identity is the CALLER's to declare, not something inferred from
+      // the purchase parameters — parameters can't tell "retry of one purchase"
+      // from "a second, genuinely-distinct purchase of the same item" (which a
+      // cumulative wallet exists to allow). When the agent passes an
+      // idempotency_token (reused only to retry one attempt), both the cart id and
+      // the Idempotency-Key derive from it — stable across the retry AND
+      // price-independent, so a price move between the purchase and its retry
+      // still dedups. Absent, both are random per call: a new purchase every time,
+      // so an identical repeat buy settles for real instead of replaying a fake
+      // "captured".
+      const cartId = idempotency_token
+        ? sha256Hex(canonicalJson({ purchase_cart: idempotency_token }))
+        : undefined
+      const idempotencyKey = idempotency_token
+        ? sha256Hex(canonicalJson({ purchase_idem: idempotency_token }))
+        : undefined
 
       const cart = buildCartDraft(
         [
@@ -322,10 +339,12 @@ export function registerRequestPurchaseTool(
         cartId,
       )
 
-      // Client-side price bound (§ max_price_paise): the facilitator already
-      // rejects a price that disagrees with its catalog (PRICE_MISMATCH); this
-      // additionally pins the spend to the number the agent showed the user, so a
-      // legitimate catalog price rise can't capture above what was quoted.
+      // Client-side price bound (§ max_price_paise): an agent-side guard, not a
+      // system control — the facilitator has no per-purchase price ceiling (only
+      // PRICE_MISMATCH against its catalog and the cumulative mandate ceiling), so
+      // this only binds purchases made through this tool. It lets the agent pin
+      // the spend to the figure it quoted the user; a different caller would not
+      // be bound by it.
       if (max_price_paise !== undefined && cart.total_paise > max_price_paise) {
         return jsonResult({
           state: 'rejected',
@@ -341,6 +360,7 @@ export function registerRequestPurchaseTool(
         intent: record.intent,
         cart,
         agent: deps.agent,
+        ...(idempotencyKey ? { idempotencyKey } : {}),
       })
 
       if (result.state === 'captured') {

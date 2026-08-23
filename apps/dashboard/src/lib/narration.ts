@@ -50,6 +50,43 @@ function short(hex: string | undefined): string {
   return hex ? `${hex.slice(0, 10)}…` : 'unknown'
 }
 
+/**
+ * Purely presentational grouping of ledger event types into a visual tone —
+ * green for money-moved-as-expected, red for rejected/blocked/reversed,
+ * amber for anything still in flight or waiting on a decision. This does not
+ * change what any event means; `describeLedgerEvent` remains the single
+ * source of truth for event semantics. Shared by the Live ledger tab and the
+ * per-order receipt timeline so both render the same event the same color.
+ */
+export function eventTone(eventType: LedgerEventType): 'success' | 'danger' | 'warn' | 'neutral' {
+  switch (eventType) {
+    case 'mandate_registered':
+    case 'verify_passed':
+    case 'approval_granted':
+    case 'payment_captured':
+      return 'success'
+    case 'mandate_revoked':
+    case 'verify_rejected':
+    case 'approval_rejected':
+    case 'approval_expired':
+    case 'payment_failed':
+    case 'webhook_rejected':
+    case 'reconciliation_flagged':
+    case 'settlement_abandoned':
+      return 'danger'
+    case 'approval_requested':
+    case 'settlement_created':
+    case 'attempt_initiated':
+    case 'attempt_superseded':
+    case 'payment_link_issued':
+    case 'anomaly_refund_issued':
+    case 'agent_decision':
+      return 'warn'
+    default:
+      return 'neutral'
+  }
+}
+
 /** Renders one ledger event as a plain-English sentence. Exhaustive over
  * `LedgerEventType` — adding a new event type without a case here is a
  * compile error. */

@@ -13,7 +13,8 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./scanner": "./src/scanner.ts"
+    "./scanner": "./src/scanner.ts",
+    "./run": "./src/run.ts"
   },
   "scripts": {
     "build": "tsc",

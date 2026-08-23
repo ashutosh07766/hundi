@@ -1,0 +1,46 @@
+{
+  "name": "hundi",
+  "version": "0.1.0",
+  "description": "Make any online store agent-transactable — scan a store, generate its AI-agent surface, and register it with a Hundi trust facilitator.",
+  "type": "module",
+  "bin": {
+    "hundi": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ashutosh07766/hundi.git"
+  },
+  "homepage": "https://github.com/ashutosh07766/hundi#readme",
+  "bugs": {
+    "url": "https://github.com/ashutosh07766/hundi/issues"
+  },
+  "keywords": [
+    "agentic-commerce",
+    "ai-agents",
+    "payments",
+    "razorpay",
+    "mcp",
+    "llms-txt",
+    "schema-org"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@hundi/cli": "workspace:*",
+    "@types/node": "^24.0.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.0"
+  }
+}

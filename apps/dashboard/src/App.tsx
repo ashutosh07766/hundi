@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { IdentityBar } from './components/IdentityBar.js'
+import { Header } from './components/Header.js'
+import { HowItWorks } from './components/HowItWorks.js'
 import { LiveLedger } from './components/LiveLedger.js'
 import { MandateCeremony } from './components/MandateCeremony.js'
 import { MandatesList } from './components/MandatesList.js'
@@ -20,25 +21,28 @@ function App() {
 
   return (
     <IdentityProvider>
-      <IdentityBar />
-      <nav className="tabs">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            className={`tabs__item ${tab === t.id ? 'tabs__item--active' : ''}`}
-            onClick={() => setTab(t.id)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
-      <main className="main">
-        {tab === 'ceremony' && <MandateCeremony />}
-        {tab === 'approvals' && <PendingApprovals />}
-        {tab === 'ledger' && <LiveLedger />}
-        {tab === 'mandates' && <MandatesList />}
-      </main>
+      <Header />
+      <div className="page">
+        <HowItWorks />
+        <nav className="tabs">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={`tabs__item ${tab === t.id ? 'tabs__item--active' : ''}`}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
+        <main className="main">
+          {tab === 'ceremony' && <MandateCeremony />}
+          {tab === 'approvals' && <PendingApprovals />}
+          {tab === 'ledger' && <LiveLedger />}
+          {tab === 'mandates' && <MandatesList />}
+        </main>
+      </div>
     </IdentityProvider>
   )
 }

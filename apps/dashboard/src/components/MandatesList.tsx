@@ -10,6 +10,7 @@ import { runTestPurchase } from '../lib/buyer.js'
 import { FACILITATOR_URL } from '../lib/config.js'
 import { formatPaise } from '../lib/format.js'
 import { signRevoke } from '../lib/intent.js'
+import { CheckCircleIcon, ClockIcon, XCircleIcon } from './icons.js'
 
 type RowStatus = { pending: boolean; error: string | null }
 
@@ -17,10 +18,17 @@ type PurchaseKind = 'ok' | 'pending' | 'blocked' | 'error' | 'busy'
 type PurchaseStatus = { kind: PurchaseKind; message: string }
 
 function purchaseStatusClass(kind: PurchaseKind): string {
-  if (kind === 'ok') return 'status status--ok'
-  if (kind === 'pending') return 'status status--pending'
-  if (kind === 'blocked' || kind === 'error') return 'status status--error'
-  return 'status status--busy'
+  if (kind === 'ok') return 'status-chip status-chip--ok'
+  if (kind === 'pending') return 'status-chip status-chip--pending'
+  if (kind === 'blocked' || kind === 'error') return 'status-chip status-chip--error'
+  return 'status-chip status-chip--busy'
+}
+
+function PurchaseStatusIcon({ kind }: { kind: PurchaseKind }) {
+  if (kind === 'ok') return <CheckCircleIcon />
+  if (kind === 'pending') return <ClockIcon />
+  if (kind === 'blocked' || kind === 'error') return <XCircleIcon />
+  return <span className="spinner" aria-hidden="true" />
 }
 
 function outcomeKind(result: TestPurchaseResult): PurchaseKind {
@@ -33,11 +41,11 @@ function describeOutcome(result: TestPurchaseResult): string {
   const chosen = result.chosen
     ? `${result.chosen.title} at ${formatPaise(result.chosen.price_paise)}`
     : null
-  if (result.state === 'captured') return `✓ captured${chosen ? ` — ${chosen}` : ''}`
+  if (result.state === 'captured') return `Captured${chosen ? ` — ${chosen}` : ''}`
   if (result.state === 'pending_approval') {
-    return `⏳ pending approval${chosen ? ` — ${chosen}` : ''} → go to Pending approvals to sign off`
+    return `Pending approval${chosen ? ` — ${chosen}` : ''} — go to Pending approvals to sign off`
   }
-  return `✗ blocked: ${result.reason ?? result.state}`
+  return `Blocked: ${result.reason ?? result.state}`
 }
 
 function safeParseIntent(intentJson: string): IntentMandate | null {
@@ -128,7 +136,10 @@ export function MandatesList() {
               : 'no agent key stored for this mandate'
           const purchaseButtonsDisabled = !canRunPurchase || purchase?.kind === 'busy'
           return (
-            <article className="card" key={row.mandate_id}>
+            <article
+              className={`card mandate-card ${revoked ? 'mandate-card--revoked' : ''}`}
+              key={row.mandate_id}
+            >
               <div className="card__row">
                 <h3>{intent?.goal ?? '(unparseable intent)'}</h3>
                 {revoked ? (
@@ -137,33 +148,34 @@ export function MandatesList() {
                   <span className="pill pill--ok">Active</span>
                 )}
               </div>
-              <div className="card__row card__row--muted">
-                <span>
-                  {intent && (
-                    <>
-                      Ceiling {formatPaise(intent.ceiling_paise)} · Threshold{' '}
-                      {formatPaise(intent.approval_threshold_paise)} · {intent.merchants.join(', ')}
-                    </>
-                  )}
-                </span>
+
+              {intent && (
+                <dl className="mandate-card__stats">
+                  <div className="mandate-card__stat">
+                    <dt>Ceiling</dt>
+                    <dd>{formatPaise(intent.ceiling_paise)}</dd>
+                  </div>
+                  <div className="mandate-card__stat">
+                    <dt>Approval threshold</dt>
+                    <dd>{formatPaise(intent.approval_threshold_paise)}</dd>
+                  </div>
+                  <div className="mandate-card__stat mandate-card__stat--wide">
+                    <dt>Merchants</dt>
+                    <dd>{intent.merchants.join(', ')}</dd>
+                  </div>
+                </dl>
+              )}
+
+              <div className="card__row card__row--muted mandate-card__id">
                 <code className="hash">{row.mandate_id}</code>
               </div>
+
               <div className="card__actions">
-                {!revoked && (
-                  <button
-                    type="button"
-                    className="btn btn--danger"
-                    disabled={status?.pending}
-                    onClick={() => revoke(row.mandate_id)}
-                  >
-                    {status?.pending ? 'Revoking…' : 'Revoke'}
-                  </button>
-                )}
                 {intent && (
                   <>
                     <button
                       type="button"
-                      className="btn btn--ghost btn--small"
+                      className="btn btn--primary btn--small"
                       disabled={purchaseButtonsDisabled}
                       title={purchaseDisabledTitle}
                       onClick={() => runTest(row.mandate_id, intent, false)}
@@ -181,9 +193,25 @@ export function MandatesList() {
                     </button>
                   </>
                 )}
+                {!revoked && (
+                  <button
+                    type="button"
+                    className="btn btn--danger btn--small"
+                    disabled={status?.pending}
+                    onClick={() => revoke(row.mandate_id)}
+                  >
+                    {status?.pending ? 'Revoking…' : 'Revoke'}
+                  </button>
+                )}
                 {status?.error && <span className="status status--error">{status.error}</span>}
               </div>
-              {purchase && <p className={purchaseStatusClass(purchase.kind)}>{purchase.message}</p>}
+
+              {purchase && (
+                <p className={purchaseStatusClass(purchase.kind)}>
+                  <PurchaseStatusIcon kind={purchase.kind} />
+                  <span>{purchase.message}</span>
+                </p>
+              )}
             </article>
           )
         })}

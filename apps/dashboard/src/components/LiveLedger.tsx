@@ -2,11 +2,49 @@ import { useState } from 'react'
 import { usePolling } from '../hooks/use-polling.js'
 import type { VerifyLedgerResult } from '../lib/api.js'
 import { listLedger, verifyLedgerChain } from '../lib/api.js'
+import type { LedgerEventType } from '../lib/narration.js'
 import { describeLedgerEvent } from '../lib/narration.js'
+import { ShieldCheckIcon } from './icons.js'
 
 async function loadLedger() {
   const events = await listLedger(100)
   return [...events].sort((a, b) => b.seq - a.seq)
+}
+
+/**
+ * Purely presentational grouping of ledger event types into a visual tone —
+ * green for money-moved-as-expected, red for rejected/blocked/reversed,
+ * amber for anything still in flight or waiting on a decision. This does not
+ * change what any event means; `describeLedgerEvent` remains the single
+ * source of truth for event semantics.
+ */
+function eventTone(eventType: LedgerEventType): 'success' | 'danger' | 'warn' | 'neutral' {
+  switch (eventType) {
+    case 'mandate_registered':
+    case 'verify_passed':
+    case 'approval_granted':
+    case 'payment_captured':
+      return 'success'
+    case 'mandate_revoked':
+    case 'verify_rejected':
+    case 'approval_rejected':
+    case 'approval_expired':
+    case 'payment_failed':
+    case 'webhook_rejected':
+    case 'reconciliation_flagged':
+    case 'settlement_abandoned':
+      return 'danger'
+    case 'approval_requested':
+    case 'settlement_created':
+    case 'attempt_initiated':
+    case 'attempt_superseded':
+    case 'payment_link_issued':
+    case 'anomaly_refund_issued':
+    case 'agent_decision':
+      return 'warn'
+    default:
+      return 'neutral'
+  }
 }
 
 export function LiveLedger() {
@@ -39,10 +77,11 @@ export function LiveLedger() {
         </div>
         <button
           type="button"
-          className="btn btn--ghost"
+          className="btn btn--primary btn--icon"
           onClick={handleVerify}
           disabled={verifying}
         >
+          <ShieldCheckIcon />
           {verifying ? 'Verifying…' : 'Verify chain'}
         </button>
       </div>
@@ -73,7 +112,7 @@ export function LiveLedger() {
 
       <ol className="ledger">
         {(events ?? []).map((ev) => (
-          <li className="ledger__row" key={ev.seq}>
+          <li className={`ledger__row ledger__row--${eventTone(ev.event_type)}`} key={ev.seq}>
             <span className="ledger__seq">#{ev.seq}</span>
             <div className="ledger__body">
               <p className="ledger__narration">{describeLedgerEvent(ev.event_type, ev.payload)}</p>

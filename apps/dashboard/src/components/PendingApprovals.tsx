@@ -6,6 +6,7 @@ import type { MandateListItem, SettlementListItem } from '../lib/api.js'
 import { listMandates, listSettlements, postApproval } from '../lib/api.js'
 import { formatPaise } from '../lib/format.js'
 import { signApprovalDecision } from '../lib/intent.js'
+import { CheckCircleIcon, XCircleIcon } from './icons.js'
 
 type Loaded = { settlements: SettlementListItem[]; mandatesById: Map<string, IntentMandate> }
 
@@ -92,18 +93,21 @@ export function PendingApprovals() {
           const cart = safeParseCart(s.cart_json)
           const status = statusById[s.id]
           return (
-            <article className="card" key={s.id}>
+            <article className="card decision-card" key={s.id}>
               <div className="card__row">
                 <h3>{intent?.goal ?? '(mandate details unavailable)'}</h3>
-                <span className="pill">{s.merchant_id}</span>
+                <span className="pill pill--warn">{s.merchant_id}</span>
               </div>
-              <div className="card__row card__row--muted">
-                <span>
-                  Total <strong>{formatPaise(s.amount_paise)}</strong>
-                  {intent && <> · Threshold {formatPaise(intent.approval_threshold_paise)}</>}
-                </span>
-                <code className="hash">{s.mandate_cart_hash_hex.slice(0, 16)}…</code>
+
+              <div className="decision-card__amount">
+                <span className="decision-card__amount-value">{formatPaise(s.amount_paise)}</span>
+                {intent && (
+                  <span className="decision-card__amount-note">
+                    above the {formatPaise(intent.approval_threshold_paise)} approval threshold
+                  </span>
+                )}
               </div>
+
               {cart && (
                 <ul className="line-items">
                   {cart.items.map((item) => (
@@ -113,21 +117,28 @@ export function PendingApprovals() {
                   ))}
                 </ul>
               )}
+
+              <div className="card__row card__row--muted decision-card__ref">
+                <code className="hash">{s.mandate_cart_hash_hex.slice(0, 16)}…</code>
+              </div>
+
               <div className="card__actions">
                 <button
                   type="button"
-                  className="btn btn--primary"
+                  className="btn btn--primary btn--icon"
                   disabled={status?.pending}
                   onClick={() => decide(s, 'approved')}
                 >
+                  <CheckCircleIcon />
                   Approve
                 </button>
                 <button
                   type="button"
-                  className="btn btn--danger"
+                  className="btn btn--danger btn--icon"
                   disabled={status?.pending}
                   onClick={() => decide(s, 'rejected')}
                 >
+                  <XCircleIcon />
                   Reject
                 </button>
                 {status?.success && <span className="status status--ok">{status.success}</span>}

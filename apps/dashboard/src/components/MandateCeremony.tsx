@@ -7,6 +7,7 @@ import { rupeesToPaise } from '../lib/format.js'
 import type { SignedCeremony } from '../lib/intent.js'
 import { buildSignedIntent } from '../lib/intent.js'
 import { generateKeypair } from '../lib/signing.js'
+import { SignatureIcon } from './icons.js'
 
 function defaultExpiryLocal(hoursFromNow: number): string {
   const d = new Date(Date.now() + hoursFromNow * 60 * 60 * 1000)
@@ -120,75 +121,90 @@ export function MandateCeremony() {
       </p>
 
       <form className="form" onSubmit={handleSubmit}>
-        <label className="field">
-          <span>Goal</span>
-          <input
-            required
-            value={goal}
-            onChange={(e) => setGoal(e.target.value)}
-            placeholder="Restock office snacks"
-          />
-        </label>
-
-        <div className="field-row">
+        <fieldset className="form-group">
+          <legend className="form-group__legend">What is this mandate for</legend>
           <label className="field">
-            <span>Ceiling (₹)</span>
+            <span>Goal</span>
             <input
               required
-              type="number"
-              min="1"
-              step="1"
-              value={ceilingRupees}
-              onChange={(e) => setCeilingRupees(e.target.value)}
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
+              placeholder="Restock office snacks"
             />
           </label>
+        </fieldset>
+
+        <fieldset className="form-group">
+          <legend className="form-group__legend">Spending limits</legend>
+          <div className="field-row">
+            <label className="field">
+              <span>Ceiling (₹)</span>
+              <input
+                required
+                type="number"
+                min="1"
+                step="1"
+                value={ceilingRupees}
+                onChange={(e) => setCeilingRupees(e.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>Approval threshold (₹)</span>
+              <input
+                required
+                type="number"
+                min="0"
+                step="1"
+                value={thresholdRupees}
+                onChange={(e) => setThresholdRupees(e.target.value)}
+              />
+            </label>
+          </div>
+          <p className="form-group__hint">
+            <strong>Ceiling</strong> is the total the agent can ever spend under this mandate.{' '}
+            <strong>Threshold</strong> is a per-purchase line — any single cart above it pauses and
+            waits for your approval instead of settling automatically.
+          </p>
+        </fieldset>
+
+        <fieldset className="form-group">
+          <legend className="form-group__legend">Scope</legend>
           <label className="field">
-            <span>Approval threshold (₹)</span>
+            <span>Merchants (comma-separated)</span>
             <input
               required
-              type="number"
-              min="0"
-              step="1"
-              value={thresholdRupees}
-              onChange={(e) => setThresholdRupees(e.target.value)}
+              value={merchantsCsv}
+              onChange={(e) => setMerchantsCsv(e.target.value)}
+              placeholder="merchant-1, merchant-2"
             />
           </label>
-        </div>
 
-        <label className="field">
-          <span>Merchants (comma-separated)</span>
-          <input
-            required
-            value={merchantsCsv}
-            onChange={(e) => setMerchantsCsv(e.target.value)}
-            placeholder="merchant-1, merchant-2"
-          />
-        </label>
+          <label className="field">
+            <span>Agent public key (hex)</span>
+            <input
+              value={agentPubkeyHex}
+              onChange={(e) => setAgentPubkeyHex(e.target.value)}
+              placeholder="Paste the agent's ed25519 pubkey — leave blank to mint an ephemeral one"
+            />
+            <small className="field__hint">
+              The buyer agent's key, generated out-of-band. It signs carts; it can never approve or
+              revoke. Leave blank and the dashboard mints a throwaway agent key to hand off.
+            </small>
+          </label>
 
-        <label className="field">
-          <span>Agent public key (hex)</span>
-          <input
-            value={agentPubkeyHex}
-            onChange={(e) => setAgentPubkeyHex(e.target.value)}
-            placeholder="Paste the agent's ed25519 pubkey — leave blank to mint an ephemeral one"
-          />
-          <small className="field__hint">
-            The buyer agent's key, generated out-of-band. It signs carts; it can never approve or
-            revoke. Leave blank and the dashboard mints a throwaway agent key to hand off.
-          </small>
-        </label>
+          <label className="field">
+            <span>Expires</span>
+            <input
+              required
+              type="datetime-local"
+              value={expiryLocal}
+              onChange={(e) => setExpiryLocal(e.target.value)}
+            />
+          </label>
+        </fieldset>
 
-        <label className="field">
-          <span>Expires</span>
-          <input
-            required
-            type="datetime-local"
-            value={expiryLocal}
-            onChange={(e) => setExpiryLocal(e.target.value)}
-          />
-        </label>
-
-        <button type="submit" className="btn btn--primary" disabled={busy}>
+        <button type="submit" className="btn btn--primary btn--icon" disabled={busy}>
+          <SignatureIcon />
           {busy ? 'Signing…' : 'Sign & register mandate'}
         </button>
       </form>

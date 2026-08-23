@@ -458,7 +458,7 @@ export function extractShopifyProducts(
   return { products, warnings }
 }
 
-function deriveMerchantId(url: string): string {
+export function deriveMerchantId(url: string): string {
   const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, '')
   return hostname.replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'merchant'
 }

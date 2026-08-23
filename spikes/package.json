@@ -10,10 +10,12 @@
     "payment-link-probe": "tsx rail-matrix/payment-link-probe.ts",
     "webhook-listener": "tsx rail-matrix/webhook-listener.ts",
     "repeat-probe": "tsx rail-matrix/repeat-probe.ts",
+    "checkout-driver": "tsx checkout-driver/run-spike.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "playwright": "^1.62.1",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0"
   }

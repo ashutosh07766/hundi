@@ -13,5 +13,5 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["rail-matrix/**/*.ts"]
+  "include": ["rail-matrix/**/*.ts", "checkout-driver/**/*.ts"]
 }

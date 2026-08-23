@@ -7,3 +7,4 @@ dist/
 *.db-journal
 test-results/
 .DS_Store
+spikes/checkout-driver/artifacts/

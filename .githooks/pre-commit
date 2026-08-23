@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+# Blocks commits containing secrets, when gitleaks is available.
+# Without gitleaks installed, warns and lets the commit through — install it locally for real coverage.
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged
+  exit $?
+else
+  echo "warning: gitleaks not installed — skipping secret scan (install: https://github.com/gitleaks/gitleaks)" >&2
+  exit 0
+fi

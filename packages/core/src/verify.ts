@@ -1,0 +1,204 @@
+/**
+ * The mandate-chain verification gate. This is the only place authorization
+ * decisions get made — every check is deterministic given `ctx`, and checks
+ * run in a fixed order so the first failure reported is always the most
+ * fundamental one (a forged signature is reported before a stale price,
+ * even if both are true).
+ *
+ * Schema validation runs first and stays structural only (shapes, non-empty
+ * strings, integer-ness) precisely because `intent`/`cart` are typed as
+ * trusted `IntentMandate`/`CartMandate` at the TS boundary but may in
+ * practice have been produced by `JSON.parse` + an unchecked cast at an HTTP
+ * boundary upstream — the runtime shape is not guaranteed by the type.
+ */
+
+import { canonicalJson } from './canonical-json.js'
+import { sha256Hex } from './hash.js'
+import type { CartItem, CartMandate, IntentMandate, SigEnvelope } from './mandate.js'
+import { cartSigningBytes, intentSigningBytes } from './mandate.js'
+import type { Credential } from './signature.js'
+import { verifyMandateSignature } from './signature.js'
+
+export type RejectionCode =
+  | 'SCHEMA_INVALID'
+  | 'MANDATE_UNKNOWN'
+  | 'SIG_INVALID_INTENT'
+  | 'HASH_LINK_MISMATCH'
+  | 'AGENT_KEY_MISMATCH'
+  | 'SIG_INVALID_CART'
+  | 'LINE_ITEM_INVALID'
+  | 'PRICE_MISMATCH'
+  | 'CURRENCY_MISMATCH'
+  | 'AMOUNT_EXCEEDS_CEILING'
+  | 'MERCHANT_NOT_IN_SCOPE'
+  | 'MANDATE_EXPIRED'
+  | 'MANDATE_REVOKED'
+  | 'ALLOWANCE_RESERVED'
+  | 'ALLOWANCE_CONSUMED'
+  | 'DUPLICATE_CART'
+
+export type VerifyCtx = {
+  now: number
+  /** Absent means the caller has no registered credential for this mandate's agent key. */
+  credential?: Credential
+  revoked: boolean
+  allowance: 'available' | 'reserved' | 'consumed'
+  catalogPrices?: Record<string, number>
+  duplicateCart: boolean
+  /** Unix-seconds grace window applied to `expires_at`. Default 60. */
+  clockSkewSec?: number
+}
+
+export type VerifyResult =
+  | { ok: true; needsApproval: boolean; mandateCartHashHex: string }
+  | { ok: false; reason: RejectionCode; detail?: string }
+
+function fail(reason: RejectionCode, detail?: string): VerifyResult {
+  return detail === undefined ? { ok: false, reason } : { ok: false, reason, detail }
+}
+
+function isNonEmptyString(v: unknown): v is string {
+  return typeof v === 'string' && v.length > 0
+}
+
+function isSafeInt(v: unknown): v is number {
+  return typeof v === 'number' && Number.isSafeInteger(v)
+}
+
+function isValidSigEnvelope(v: unknown): v is SigEnvelope {
+  if (typeof v !== 'object' || v === null) return false
+  const sig = v as Record<string, unknown>
+  if (sig.type === 'ed25519') return isNonEmptyString(sig.signature_hex)
+  if (sig.type === 'webauthn-es256') {
+    return (
+      isNonEmptyString(sig.clientDataJSON_b64u) &&
+      isNonEmptyString(sig.authenticatorData_b64u) &&
+      isNonEmptyString(sig.signature_b64u)
+    )
+  }
+  return false
+}
+
+function validateIntentSchema(intent: IntentMandate): string | undefined {
+  if (!isNonEmptyString(intent.mandateId)) return 'mandateId must be a non-empty string'
+  if (!isNonEmptyString(intent.goal)) return 'goal must be a non-empty string'
+  if (!isSafeInt(intent.ceiling_paise) || intent.ceiling_paise <= 0) {
+    return 'ceiling_paise must be a positive integer'
+  }
+  if (!isSafeInt(intent.approval_threshold_paise) || intent.approval_threshold_paise < 0) {
+    return 'approval_threshold_paise must be a non-negative integer'
+  }
+  if (!Array.isArray(intent.merchants) || intent.merchants.length === 0) {
+    return 'merchants must be a non-empty array'
+  }
+  if (!intent.merchants.every(isNonEmptyString)) return 'merchants must all be non-empty strings'
+  if (!isSafeInt(intent.expires_at)) return 'expires_at must be an integer unix timestamp'
+  if (!isNonEmptyString(intent.agent_pubkey_hex))
+    return 'agent_pubkey_hex must be a non-empty string'
+  if (!isValidSigEnvelope(intent.sig)) return 'sig is not a valid signature envelope'
+  return undefined
+}
+
+function validateCartItemSchema(item: CartItem, index: number): string | undefined {
+  if (!isNonEmptyString(item.sku)) return `items[${index}].sku must be a non-empty string`
+  if (!isSafeInt(item.qty) || item.qty < 1) return `items[${index}].qty must be an integer >= 1`
+  if (!isSafeInt(item.unit_price_paise) || item.unit_price_paise <= 0) {
+    return `items[${index}].unit_price_paise must be a positive integer`
+  }
+  return undefined
+}
+
+function validateCartSchema(cart: CartMandate): string | undefined {
+  if (!isNonEmptyString(cart.cartId)) return 'cartId must be a non-empty string'
+  if (!isNonEmptyString(cart.merchant_id)) return 'merchant_id must be a non-empty string'
+  if (!Array.isArray(cart.items) || cart.items.length === 0)
+    return 'items must be a non-empty array'
+  for (let i = 0; i < cart.items.length; i++) {
+    const err = validateCartItemSchema(cart.items[i] as CartItem, i)
+    if (err) return err
+  }
+  if (!isSafeInt(cart.total_paise) || cart.total_paise < 0) {
+    return 'total_paise must be a non-negative integer'
+  }
+  if (!isNonEmptyString(cart.intent_hash_hex)) return 'intent_hash_hex must be a non-empty string'
+  if (!isNonEmptyString(cart.agent_sig_hex)) return 'agent_sig_hex must be a non-empty string'
+  return undefined
+}
+
+/** Runs the full mandate-chain gate. Checks execute in a fixed order — see `RejectionCode`. */
+export function verifyChain(
+  intent: IntentMandate,
+  cart: CartMandate,
+  ctx: VerifyCtx,
+): VerifyResult {
+  const intentSchemaErr = validateIntentSchema(intent)
+  if (intentSchemaErr) return fail('SCHEMA_INVALID', intentSchemaErr)
+  const cartSchemaErr = validateCartSchema(cart)
+  if (cartSchemaErr) return fail('SCHEMA_INVALID', cartSchemaErr)
+
+  const credential = ctx.credential
+  if (!credential) return fail('MANDATE_UNKNOWN', 'no credential registered for this agent key')
+
+  const intentBytes = intentSigningBytes(intent)
+  if (!verifyMandateSignature(intentBytes, intent.sig, credential)) {
+    return fail('SIG_INVALID_INTENT')
+  }
+
+  const intentHashHex = sha256Hex(intentBytes)
+  if (cart.intent_hash_hex !== intentHashHex) return fail('HASH_LINK_MISMATCH')
+
+  // The credential that verified the intent signature must be the exact ed25519 key the
+  // intent declares as its agent key — otherwise a party holding a different valid credential
+  // could satisfy SIG_INVALID_INTENT without being the agent the intent actually authorizes.
+  if (credential.type !== 'ed25519' || credential.publicKey_hex !== intent.agent_pubkey_hex) {
+    return fail('AGENT_KEY_MISMATCH')
+  }
+
+  const cartBytes = cartSigningBytes(cart)
+  const cartSig: SigEnvelope = { type: 'ed25519', signature_hex: cart.agent_sig_hex }
+  if (!verifyMandateSignature(cartBytes, cartSig, credential)) return fail('SIG_INVALID_CART')
+
+  const recomputedTotal = cart.items.reduce(
+    (sum, item) => sum + item.qty * item.unit_price_paise,
+    0,
+  )
+  if (recomputedTotal !== cart.total_paise) {
+    return fail('LINE_ITEM_INVALID', 'total_paise does not match sum(qty * unit_price_paise)')
+  }
+
+  if (ctx.catalogPrices) {
+    for (const item of cart.items) {
+      const catalogPrice = ctx.catalogPrices[item.sku]
+      if (catalogPrice === undefined || catalogPrice !== item.unit_price_paise) {
+        return fail('PRICE_MISMATCH', `sku ${item.sku} price does not match catalog`)
+      }
+    }
+  }
+
+  if (intent.currency !== 'INR') return fail('CURRENCY_MISMATCH')
+
+  if (cart.total_paise > intent.ceiling_paise) return fail('AMOUNT_EXCEEDS_CEILING')
+
+  if (!intent.merchants.includes(cart.merchant_id)) return fail('MERCHANT_NOT_IN_SCOPE')
+
+  const skew = ctx.clockSkewSec ?? 60
+  if (ctx.now > intent.expires_at + skew) return fail('MANDATE_EXPIRED')
+
+  if (ctx.revoked) return fail('MANDATE_REVOKED')
+
+  if (ctx.allowance === 'reserved') return fail('ALLOWANCE_RESERVED')
+  if (ctx.allowance === 'consumed') return fail('ALLOWANCE_CONSUMED')
+
+  if (ctx.duplicateCart) return fail('DUPLICATE_CART')
+
+  const cartHashHex = sha256Hex(cartBytes)
+  const mandateCartHashHex = sha256Hex(
+    canonicalJson({ intent_hash: intentHashHex, cart_hash: cartHashHex }),
+  )
+
+  return {
+    ok: true,
+    needsApproval: cart.total_paise > intent.approval_threshold_paise,
+    mandateCartHashHex,
+  }
+}

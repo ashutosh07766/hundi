@@ -1,0 +1,20 @@
+{
+  "name": "spikes",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "s2s-probe": "tsx rail-matrix/s2s-probe.ts",
+    "s2s-failure-probe": "tsx rail-matrix/s2s-failure-probe.ts",
+    "dup-receipt-probe": "tsx rail-matrix/dup-receipt-probe.ts",
+    "payment-link-probe": "tsx rail-matrix/payment-link-probe.ts",
+    "webhook-listener": "tsx rail-matrix/webhook-listener.ts",
+    "repeat-probe": "tsx rail-matrix/repeat-probe.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

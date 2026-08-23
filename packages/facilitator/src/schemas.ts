@@ -101,6 +101,18 @@ export const agentSelectBodySchema = z.object({
   poisoned: z.boolean().optional(),
 })
 
+// POST /mandates/propose — an inert staging draft, not the signed intent itself, so
+// this deliberately has no `sig`/`credential` fields: nothing here is ever verified
+// against a credential because nothing here grants spending authority.
+export const mandateProposeBodySchema = z.object({
+  merchant_id: z.string().min(1),
+  goal: z.string().min(1),
+  ceiling_paise: z.number().int().positive(),
+  approval_threshold_paise: z.number().int().nonnegative(),
+  agent_pubkey_hex: z.string().min(1),
+  expires_at: z.number().int().positive().optional(),
+})
+
 export const adminMerchantBodySchema = z.object({
   merchant_id: z.string().min(1),
   name: z.string().min(1),

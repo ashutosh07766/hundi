@@ -35,6 +35,9 @@ const envSchema = z.object({
   LLM_BASE_URL: z.string().min(1).optional(),
   LLM_API_KEY: z.string().min(1).optional(),
   LLM_MODEL: z.string().min(1).optional(),
+  // Origin POST /mandates/propose builds approve_url against (see routes/mandate-proposals.ts).
+  // Defaults to the dashboard's dev origin — the same one app.ts's CORS allow-list pins.
+  DASHBOARD_URL: z.string().min(1).optional(),
 })
 
 export type Env = z.infer<typeof envSchema>

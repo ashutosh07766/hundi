@@ -146,6 +146,23 @@ CREATE TABLE IF NOT EXISTS store_catalogs (
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
+-- An inert staging draft for a mandate: proposes terms (ceiling, threshold, merchant,
+-- agent key) without binding any credential or granting any spending authority. Rows
+-- here become a real mandate only via the existing signed POST /mandates flow — this
+-- table is never read by verifyChain or any settlement path.
+CREATE TABLE IF NOT EXISTS mandate_proposals (
+  id TEXT PRIMARY KEY,
+  merchant_id TEXT NOT NULL,
+  goal TEXT NOT NULL,
+  ceiling_paise INTEGER NOT NULL,
+  approval_threshold_paise INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'INR',
+  agent_pubkey_hex TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','consumed','expired')),
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
 CREATE TABLE IF NOT EXISTS ledger_events (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   event_type TEXT NOT NULL CHECK(event_type IN (

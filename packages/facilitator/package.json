@@ -6,12 +6,19 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "verify-ledger": "tsx bin/verify-ledger.ts"
   },
   "dependencies": {
-    "@hundi/core": "workspace:*"
+    "@hundi/core": "workspace:*",
+    "better-sqlite3": "^13.0.3"
   },
   "devDependencies": {
-    "typescript": "^5.9.0"
+    "@types/better-sqlite3": "^7.6.13",
+    "node-gyp": "^11.0.0",
+    "typescript": "^5.9.0",
+    "tsx": "^4.20.0",
+    "vitest": "^4.0.0"
   }
 }

@@ -77,7 +77,7 @@ type LlmPick = { chosen_sku: string; reason: string }
 /** Every reason `resolveChoice` can fall back to the scripted rule for —
  * logged verbatim so a demo transcript shows exactly why an override
  * happened. */
-type GuardrailOverrideReason =
+export type GuardrailOverrideReason =
   | 'NO_LLM_PICK'
   | 'SKU_NOT_IN_CANDIDATES'
   | 'OUT_OF_STOCK'
@@ -88,6 +88,28 @@ type ResolvedChoice = {
   overridden: boolean
   overrideReason?: GuardrailOverrideReason
   llmReason?: string
+}
+
+/** Narrower than `LlmGoal` — just what the selection step (as opposed to the
+ * full purchase flow) needs. `threshold_paise` only matters after a product
+ * is already chosen (it decides whether the cart needs human approval), so
+ * callers that only want a recommendation — like the facilitator's
+ * /agent/select — never have to invent one. */
+export type ChooseProductGoal = { query: string; ceiling_paise: number }
+
+export type ChooseProductArgs = {
+  candidates: Product[]
+  goal: ChooseProductGoal
+  chat: ChatClient
+  log?: LogStep
+}
+
+export type ChooseProductResult = {
+  product?: Product
+  chosen_sku?: string
+  reason?: string
+  overridden: boolean
+  override_reason?: GuardrailOverrideReason
 }
 
 /** Runs one LLM-brain purchase attempt against `tools` for `goal`, authorized
@@ -110,10 +132,9 @@ export async function runLlmPurchase(
   const candidates = await tools.searchCatalog()
   log('search', { query: goal.query, resultCount: candidates.length })
 
-  const pick = await askLlm(chat, goal, candidates)
-  const resolved = resolveChoice(pick, candidates, goal, log)
+  const choice = await chooseProduct({ candidates, goal, chat, log })
 
-  const { product } = resolved
+  const { product } = choice
   if (!product) {
     log('select', { outcome: 'no_candidate' })
     return { status: 'blocked', reason: 'NO_CANDIDATE' }
@@ -122,9 +143,9 @@ export async function runLlmPurchase(
     sku: product.id,
     title: product.title,
     price_paise: product.price_paise,
-    llm_reason: resolved.llmReason ?? null,
-    overridden: resolved.overridden,
-    override_reason: resolved.overrideReason ?? null,
+    llm_reason: choice.reason ?? null,
+    overridden: choice.overridden,
+    override_reason: choice.override_reason ?? null,
   })
 
   const cart = tools.proposeCart([{ product, qty: 1 }])
@@ -144,7 +165,7 @@ export async function runLlmPurchase(
   })
 
   if (settlement.state === 'pending_approval' && tools.recordDecision) {
-    await recordRationale(tools, settlement, product, resolved, mandate.agent, log)
+    await recordRationale(tools, settlement, product, choice, mandate.agent, log)
   }
 
   const outcome = toOutcome(settlement, product)
@@ -152,17 +173,44 @@ export async function runLlmPurchase(
   return outcome
 }
 
-/** Builds the real `ChatClient` from `config`, deferring the `chatJson` call
- * (and thus any I/O) until a purchase actually asks for a pick. Throws
- * immediately — rather than silently degrading to some default endpoint — if
- * neither a fake `deps.chat` nor a `config` was supplied; there is no safe
- * default provider to fall back to. */
-function buildDefaultChatClient(config: LlmConfig | undefined): ChatClient {
+/** Builds a `ChatClient` from `{baseUrl,apiKey,model}`, deferring the
+ * `chatJson` call (and thus any I/O) until a purchase actually asks for a
+ * pick. Exported so any caller that wants the real OpenAI-compatible client —
+ * `runLlmPurchase` itself, or an external caller of `chooseProduct` like the
+ * facilitator's /agent/select — doesn't have to re-implement this wiring.
+ * `config` undefined throws immediately rather than silently degrading to
+ * some default endpoint; there is no safe default provider to fall back to. */
+export function buildDefaultChatClient(config: LlmConfig | undefined): ChatClient {
   if (!config) {
-    throw new Error('runLlmPurchase: either deps.chat or config (baseUrl/apiKey/model) is required')
+    throw new Error('either deps.chat or config (baseUrl/apiKey/model) is required')
   }
   return {
     chatJson: (args) => chatJson({ ...config, ...args }),
+  }
+}
+
+/** The pure product-selection step shared by `runLlmPurchase` and any other
+ * caller that only needs a recommendation, not a full purchase — e.g. the
+ * facilitator's /agent/select, which advises a dashboard-held agent key
+ * rather than spending anything itself. Runs the model's pick through the
+ * same validation `runLlmPurchase` always has: an unknown sku, an
+ * out-of-stock sku, or a sku over the goal's ceiling never reaches the
+ * caller — it's replaced by the cheapest in-stock match under the ceiling,
+ * flagged via `overridden`/`override_reason` so the caller can disclose the
+ * fallback instead of presenting it as the model's own reasoning. */
+export async function chooseProduct({
+  candidates,
+  goal,
+  chat,
+  log = () => {},
+}: ChooseProductArgs): Promise<ChooseProductResult> {
+  const pick = await askLlm(chat, goal, candidates)
+  const resolved = resolveChoice(pick, candidates, goal, log)
+  return {
+    ...(resolved.product ? { product: resolved.product, chosen_sku: resolved.product.id } : {}),
+    ...(resolved.llmReason !== undefined ? { reason: resolved.llmReason } : {}),
+    overridden: resolved.overridden,
+    ...(resolved.overrideReason ? { override_reason: resolved.overrideReason } : {}),
   }
 }
 
@@ -170,13 +218,13 @@ async function recordRationale(
   tools: BuyerTools,
   settlement: SettlementResult,
   product: Product,
-  resolved: ResolvedChoice,
+  choice: ChooseProductResult,
   agent: AgentKeypair,
   log: LogStep,
 ): Promise<void> {
-  const rationale = resolved.overridden
-    ? `guardrail override (${resolved.overrideReason}): fell back to cheapest in-stock match under the goal ceiling`
-    : (resolved.llmReason ?? 'LLM selection')
+  const rationale = choice.overridden
+    ? `guardrail override (${choice.override_reason}): fell back to cheapest in-stock match under the goal ceiling`
+    : (choice.reason ?? 'LLM selection')
   try {
     await tools.recordDecision?.({
       settlementId: settlement.settlement_id,
@@ -199,7 +247,7 @@ async function recordRationale(
  * trust an unparsed pick. */
 async function askLlm(
   chat: ChatClient,
-  goal: LlmGoal,
+  goal: ChooseProductGoal,
   candidates: Product[],
 ): Promise<LlmPick | undefined> {
   const { system, user } = buildPrompt(goal, candidates)
@@ -212,7 +260,10 @@ async function askLlm(
  * within-budget items are prioritized so the cap never hides a valid pick. */
 const MAX_LLM_CANDIDATES = 90
 
-function buildPrompt(goal: LlmGoal, candidates: Product[]): { system: string; user: string } {
+function buildPrompt(
+  goal: ChooseProductGoal,
+  candidates: Product[],
+): { system: string; user: string } {
   const ranked = [...candidates].sort((a, b) => {
     const aOk = a.availability.status === 'in_stock' && a.price_paise <= goal.ceiling_paise
     const bOk = b.availability.status === 'in_stock' && b.price_paise <= goal.ceiling_paise
@@ -244,7 +295,7 @@ function buildPrompt(goal: LlmGoal, candidates: Product[]): { system: string; us
 /** cheapest in-stock match under the goal's local ceiling — the same rule
  * scripted-brain.ts's runPurchase uses. Every brain converges on identical
  * behavior when the LLM's pick fails validation or never arrives. */
-function fallbackPick(candidates: Product[], ceiling_paise: number): Product | undefined {
+export function fallbackPick(candidates: Product[], ceiling_paise: number): Product | undefined {
   return candidates
     .filter((p) => p.availability.status === 'in_stock' && p.price_paise <= ceiling_paise)
     .sort((a, b) => a.price_paise - b.price_paise)[0]
@@ -257,7 +308,7 @@ function fallbackPick(candidates: Product[], ceiling_paise: number): Product | u
 function resolveChoice(
   pick: LlmPick | undefined,
   candidates: Product[],
-  goal: LlmGoal,
+  goal: ChooseProductGoal,
   log: LogStep,
 ): ResolvedChoice {
   if (!pick) {
@@ -280,7 +331,7 @@ function resolveChoice(
 function override(
   reason: GuardrailOverrideReason,
   candidates: Product[],
-  goal: LlmGoal,
+  goal: ChooseProductGoal,
   log: LogStep,
   pick?: LlmPick,
 ): ResolvedChoice {

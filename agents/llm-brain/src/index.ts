@@ -71,5 +71,15 @@ if (isMain) {
   })
 }
 
-export type { ChatClient, LlmBrainDeps, LlmConfig, LlmGoal, LlmPurchaseArgs } from './llm-brain.js'
-export { runLlmPurchase } from './llm-brain.js'
+export type {
+  ChatClient,
+  ChooseProductArgs,
+  ChooseProductGoal,
+  ChooseProductResult,
+  GuardrailOverrideReason,
+  LlmBrainDeps,
+  LlmConfig,
+  LlmGoal,
+  LlmPurchaseArgs,
+} from './llm-brain.js'
+export { buildDefaultChatClient, chooseProduct, fallbackPick, runLlmPurchase } from './llm-brain.js'

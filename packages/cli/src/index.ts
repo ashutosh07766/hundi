@@ -17,4 +17,11 @@ export type {
   ScanOptions,
   ScanResult,
 } from './scanner.js'
-export { extractLinks, extractProducts, ScanError, safeFetch, scanStore } from './scanner.js'
+export {
+  extractLinks,
+  extractProducts,
+  extractShopifyProducts,
+  ScanError,
+  safeFetch,
+  scanStore,
+} from './scanner.js'

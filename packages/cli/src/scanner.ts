@@ -353,9 +353,183 @@ export function extractLinks(html: string, baseUrl: string): string[] {
   return links
 }
 
+// ---------------------------------------------------------------------------
+// Pure Shopify products.json mapping — no I/O, safe to unit test against
+// fixture JSON.
+// ---------------------------------------------------------------------------
+
+const HTML_TAG_RE = /<[^>]*>/g
+const SHOPIFY_DESCRIPTION_MAX_CHARS = 300
+
+function stripHtml(raw: string): string {
+  return raw.replace(HTML_TAG_RE, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function truncate(text: string, maxChars: number): string {
+  return text.length > maxChars ? `${text.slice(0, maxChars).trimEnd()}…` : text
+}
+
+/** Maps Shopify's `/products.json` storefront feed onto the scanner's product
+ * shape. Every Shopify store exposes this feed regardless of theme, unlike
+ * schema.org JSON-LD, which many themes omit entirely — this is the fallback
+ * that makes the scanner work on the broad population of Shopify merchants.
+ * Pure — no fetch — so tests exercise it directly against fixture JSON.
+ *
+ * The feed carries no currency field; prices are denominated in the store's
+ * storefront currency, and every scanned store here is assumed Indian, so
+ * currency is hardcoded to INR rather than inferred. */
+export function extractShopifyProducts(
+  json: unknown,
+  baseUrl: string,
+  merchantId: string,
+): { products: ScannedProduct[]; warnings: string[] } {
+  const warnings: string[] = []
+  const products: ScannedProduct[] = []
+
+  if (
+    !json ||
+    typeof json !== 'object' ||
+    !Array.isArray((json as Record<string, unknown>).products)
+  ) {
+    return { products, warnings }
+  }
+
+  const rawProducts = (json as { products: unknown[] }).products
+  const base = new URL(baseUrl)
+
+  for (const raw of rawProducts) {
+    if (!raw || typeof raw !== 'object') continue
+    const node = raw as Record<string, unknown>
+
+    const title = typeof node.title === 'string' ? node.title.trim() : ''
+    if (!title) {
+      warnings.push(`shopify product missing title on ${baseUrl}, skipped`)
+      continue
+    }
+
+    const variants = Array.isArray(node.variants)
+      ? (node.variants as Record<string, unknown>[])
+      : []
+    const variant = variants[0]
+    if (!variant) {
+      warnings.push(`shopify product "${title}" has no variants, skipped`)
+      continue
+    }
+
+    const pricePaise = toPaise(variant.price)
+    if (pricePaise === undefined || pricePaise <= 0) {
+      warnings.push(`shopify product "${title}" has no usable price, skipped`)
+      continue
+    }
+
+    const handle =
+      typeof node.handle === 'string' && node.handle.length > 0 ? node.handle : undefined
+    const variantSku =
+      typeof variant.sku === 'string' && variant.sku.length > 0 ? variant.sku : undefined
+    // Handle is Shopify's stable, always-present, always-unique slug — prefer
+    // it over variant sku, which merchants sometimes leave blank.
+    const sku = handle ?? variantSku
+    if (!sku) {
+      warnings.push(`shopify product "${title}" has no handle or sku, skipped`)
+      continue
+    }
+
+    const images = Array.isArray(node.images) ? (node.images as Record<string, unknown>[]) : []
+    const image = typeof images[0]?.src === 'string' ? (images[0].src as string) : ''
+
+    const description =
+      typeof node.body_html === 'string' && node.body_html.length > 0
+        ? truncate(stripHtml(node.body_html), SHOPIFY_DESCRIPTION_MAX_CHARS)
+        : ''
+
+    products.push({
+      sku,
+      name: title,
+      description,
+      price_paise: pricePaise,
+      currency: 'INR',
+      availability: variant.available === true ? 'in_stock' : 'out_of_stock',
+      image,
+      brand: typeof node.vendor === 'string' && node.vendor.length > 0 ? node.vendor : merchantId,
+      url: handle ? new URL(`/products/${handle}`, base).toString() : baseUrl,
+    })
+  }
+
+  return { products, warnings }
+}
+
 function deriveMerchantId(url: string): string {
   const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, '')
   return hostname.replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'merchant'
+}
+
+const SHOPIFY_PRODUCTS_JSON_PATHS = ['/products.json', '/collections/all/products.json']
+const SHOPIFY_PRODUCTS_JSON_LIMIT = 250
+const SHOPIFY_PRODUCTS_JSON_MAX_PAGES = 3
+const SHOPIFY_PRODUCTS_JSON_MAX_PRODUCTS = 500
+
+/** Tries Shopify's `/products.json` feed, falling back to
+ * `/collections/all/products.json` if the first path yields nothing (some
+ * storefronts gate the bare path but leave the collection one open). Pages
+ * through up to `SHOPIFY_PRODUCTS_JSON_MAX_PAGES` pages of
+ * `SHOPIFY_PRODUCTS_JSON_LIMIT` each, stopping at the first non-full page or
+ * once the accumulated total reaches `SHOPIFY_PRODUCTS_JSON_MAX_PRODUCTS`, so
+ * a single scan stays bounded regardless of catalog size. A 404, a non-JSON
+ * body, or a JSON body without a `products` array is treated as "this path
+ * isn't Shopify's feed" rather than an error — the caller falls through to
+ * the empty-result case exactly as if no fallback had been attempted. */
+async function fetchShopifyProductsJson(
+  origin: string,
+  merchantId: string,
+  fetchOptions: SafeFetchOptions,
+  warnings: string[],
+): Promise<ScannedProduct[]> {
+  for (const path of SHOPIFY_PRODUCTS_JSON_PATHS) {
+    const collected: ScannedProduct[] = []
+    const seenSkus = new Set<string>()
+    let sawUsablePage = false
+
+    for (let page = 1; page <= SHOPIFY_PRODUCTS_JSON_MAX_PAGES; page++) {
+      const pageUrl = `${origin}${path}?limit=${SHOPIFY_PRODUCTS_JSON_LIMIT}&page=${page}`
+
+      let text: string
+      try {
+        text = (await safeFetch(pageUrl, fetchOptions)).text
+      } catch {
+        break
+      }
+
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        break
+      }
+
+      const rawProducts = Array.isArray((parsed as Record<string, unknown> | null)?.products)
+        ? (parsed as { products: unknown[] }).products
+        : undefined
+      if (rawProducts === undefined || rawProducts.length === 0) break
+      sawUsablePage = true
+
+      const extracted = extractShopifyProducts(parsed, pageUrl, merchantId)
+      warnings.push(...extracted.warnings)
+      for (const product of extracted.products) {
+        if (seenSkus.has(product.sku)) continue
+        seenSkus.add(product.sku)
+        collected.push(product)
+      }
+
+      const pageWasFull = rawProducts.length >= SHOPIFY_PRODUCTS_JSON_LIMIT
+      if (!pageWasFull || collected.length >= SHOPIFY_PRODUCTS_JSON_MAX_PRODUCTS) break
+    }
+
+    if (sawUsablePage && collected.length > 0) {
+      return collected.slice(0, SHOPIFY_PRODUCTS_JSON_MAX_PRODUCTS)
+    }
+  }
+
+  return []
 }
 
 export type ScanOptions = {
@@ -401,5 +575,26 @@ export async function scanStore(url: string, options: ScanOptions = {}): Promise
     }
   }
 
-  return { merchant_id: deriveMerchantId(finalUrl), products: [...bySku.values()], warnings }
+  const merchantId = deriveMerchantId(finalUrl)
+
+  // No schema.org Product markup anywhere on the page or its sampled links —
+  // fall back to Shopify's products.json feed, which is present on the vast
+  // majority of Shopify storefronts independent of theme.
+  if (bySku.size === 0) {
+    const origin = new URL(finalUrl).origin
+    const shopifyProducts = await fetchShopifyProductsJson(
+      origin,
+      merchantId,
+      fetchOptions,
+      warnings,
+    )
+    if (shopifyProducts.length > 0) {
+      for (const product of shopifyProducts) bySku.set(product.sku, product)
+      warnings.push(
+        `used Shopify products.json fallback: ${shopifyProducts.length} products (no schema.org JSON-LD found)`,
+      )
+    }
+  }
+
+  return { merchant_id: merchantId, products: [...bySku.values()], warnings }
 }

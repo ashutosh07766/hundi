@@ -116,4 +116,121 @@ describe('scanStore', () => {
     expect(mockFetch).toHaveBeenCalledTimes(6)
     expect(result.products).toHaveLength(5)
   })
+
+  describe('Shopify products.json fallback', () => {
+    function shopifyPage(products: unknown[]): Response {
+      return new Response(JSON.stringify({ products }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+
+    it('falls back to /products.json when the page has no JSON-LD products', async () => {
+      const mockFetch = vi.fn(async (input: string | URL) => {
+        const url = input.toString()
+        if (url === 'https://shop.example.com/') {
+          return new Response(html('<p>No structured data here.</p>'), { status: 200 })
+        }
+        if (url.startsWith('https://shop.example.com/products.json')) {
+          return shopifyPage([
+            {
+              handle: 'sku-a',
+              title: 'Product A',
+              vendor: 'Shop',
+              variants: [{ sku: 'v-a', price: '549.00', available: true }],
+            },
+          ])
+        }
+        return new Response('not found', { status: 404 })
+      })
+      globalThis.fetch = mockFetch as unknown as typeof fetch
+
+      const result = await scanStore('https://shop.example.com/', { resolver: publicResolver })
+
+      expect(result.products).toHaveLength(1)
+      expect(result.products[0]).toMatchObject({ sku: 'sku-a', price_paise: 54900 })
+      expect(result.warnings.some((w) => w.includes('used Shopify products.json fallback'))).toBe(
+        true,
+      )
+    })
+
+    it('tries /collections/all/products.json when the bare path yields nothing', async () => {
+      const mockFetch = vi.fn(async (input: string | URL) => {
+        const url = input.toString()
+        if (url === 'https://shop.example.com/') {
+          return new Response(html('<p>No structured data here.</p>'), { status: 200 })
+        }
+        if (url.startsWith('https://shop.example.com/products.json')) {
+          return new Response('not found', { status: 404 })
+        }
+        if (url.startsWith('https://shop.example.com/collections/all/products.json')) {
+          return shopifyPage([
+            {
+              handle: 'sku-b',
+              title: 'Product B',
+              vendor: 'Shop',
+              variants: [{ sku: 'v-b', price: '100.00', available: true }],
+            },
+          ])
+        }
+        return new Response('not found', { status: 404 })
+      })
+      globalThis.fetch = mockFetch as unknown as typeof fetch
+
+      const result = await scanStore('https://shop.example.com/', { resolver: publicResolver })
+
+      expect(result.products.map((p) => p.sku)).toEqual(['sku-b'])
+    })
+
+    it('does not hit products.json when JSON-LD products were already found', async () => {
+      const mockFetch = vi.fn(async (input: string | URL) => {
+        const url = input.toString()
+        if (url === 'https://shop.example.com/') {
+          return new Response(
+            html(
+              jsonLd({
+                '@type': 'Product',
+                name: 'Product A',
+                sku: 'sku-a',
+                offers: { price: '10.00', priceCurrency: 'INR', availability: 'InStock' },
+              }),
+            ),
+            { status: 200 },
+          )
+        }
+        return new Response('not found', { status: 404 })
+      })
+      globalThis.fetch = mockFetch as unknown as typeof fetch
+
+      const result = await scanStore('https://shop.example.com/', { resolver: publicResolver })
+
+      expect(result.products.map((p) => p.sku)).toEqual(['sku-a'])
+      const productsJsonCalls = mockFetch.mock.calls.filter((call) =>
+        call[0]?.toString().includes('products.json'),
+      )
+      expect(productsJsonCalls).toHaveLength(0)
+      expect(result.warnings.some((w) => w.includes('products.json fallback'))).toBe(false)
+    })
+
+    it('yields nothing when products.json is a non-Shopify JSON body, without crashing', async () => {
+      const mockFetch = vi.fn(async (input: string | URL) => {
+        const url = input.toString()
+        if (url === 'https://shop.example.com/') {
+          return new Response(html('<p>No structured data here.</p>'), { status: 200 })
+        }
+        // Some other JSON endpoint that happens to live at these paths but
+        // isn't Shopify's products feed.
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      })
+      globalThis.fetch = mockFetch as unknown as typeof fetch
+
+      const result = await scanStore('https://shop.example.com/', { resolver: publicResolver })
+
+      expect(result.products).toHaveLength(0)
+      expect(result.warnings.some((w) => w.includes('products.json fallback'))).toBe(false)
+    })
+  })
 })

@@ -37,6 +37,38 @@ describe('chatJson', () => {
     ])
   })
 
+  it('retries on 429 rate-limit then succeeds (no silent give-up)', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('rate limited', { status: 429 }))
+      .mockResolvedValueOnce(openAiResponse('{"chosen_sku": "sku-9", "reason": "ok"}'))
+    const sleepImpl = vi.fn().mockResolvedValue(undefined)
+
+    const pick = await chatJson({
+      ...args,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleepImpl,
+    })
+
+    expect(pick).toEqual({ chosen_sku: 'sku-9', reason: 'ok' })
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    expect(sleepImpl).toHaveBeenCalledOnce()
+  })
+
+  it('gives up (returns {}) after exhausting retries on persistent 429', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('rate limited', { status: 429 }))
+    const sleepImpl = vi.fn().mockResolvedValue(undefined)
+
+    const pick = await chatJson({
+      ...args,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleepImpl,
+    })
+
+    expect(pick).toEqual({})
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+  })
+
   it('tolerates surrounding prose around the JSON object', async () => {
     const fetchImpl = vi
       .fn()
@@ -64,15 +96,32 @@ describe('chatJson', () => {
     expect(pick).toEqual({})
   })
 
-  it('returns {} on a non-2xx response instead of throwing', async () => {
+  it('returns {} on a persistent 5xx after retries instead of throwing', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response('server error', { status: 500 }))
+    const sleepImpl = vi.fn().mockResolvedValue(undefined)
+    const pick = await chatJson({
+      ...args,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleepImpl,
+    })
+    expect(pick).toEqual({})
+  })
+
+  it('returns {} on a non-retryable client error (e.g. 401) without retrying', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('unauthorized', { status: 401 }))
     const pick = await chatJson({ ...args, fetchImpl: fetchImpl as unknown as typeof fetch })
     expect(pick).toEqual({})
+    expect(fetchImpl).toHaveBeenCalledOnce()
   })
 
   it('returns {} when fetch itself rejects (network error) instead of throwing', async () => {
     const fetchImpl = vi.fn().mockRejectedValue(new Error('network down'))
-    const pick = await chatJson({ ...args, fetchImpl: fetchImpl as unknown as typeof fetch })
+    const sleepImpl = vi.fn().mockResolvedValue(undefined)
+    const pick = await chatJson({
+      ...args,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleepImpl,
+    })
     expect(pick).toEqual({})
   })
 

@@ -516,3 +516,161 @@ describe('get_order', () => {
     expect(result.isError).toBe(true)
   })
 })
+
+describe('request_purchase — variant resolution, max price, idempotency', () => {
+  const agent = generateAgentKeypair()
+
+  const sneaker = () =>
+    catalogProduct({
+      id: 'sneaker',
+      title: 'Frido Sneakers',
+      price_paise: 449_900,
+      options: [
+        { name: 'Color', values: ['Leather Black', 'Leather Brown'] },
+        { name: 'Size', values: ['10UK', '11UK'] },
+      ],
+      variants: [
+        {
+          variant_id: 'v-black-11',
+          label: 'Leather Black / 11UK',
+          option_values: ['Leather Black', '11UK'],
+          price_paise: 449_900,
+          available: true,
+        },
+        {
+          variant_id: 'v-brown-11',
+          label: 'Leather Brown / 11UK',
+          option_values: ['Leather Brown', '11UK'],
+          price_paise: 449_900,
+          available: true,
+        },
+        {
+          variant_id: 'v-black-10',
+          label: 'Leather Black / 10UK',
+          option_values: ['Leather Black', '10UK'],
+          price_paise: 449_900,
+          available: true,
+        },
+      ],
+    })
+
+  const capturedState = (intent: ReturnType<typeof makeSignedIntent>['intent']) =>
+    makeFakeFacilitatorState({
+      catalogs: { 'demo-store-1': [sneaker()] },
+      mandates: [mandateRow({ mandateId: intent.mandateId, intent })],
+      onCreateSettlement: () => ({
+        status: 202,
+        body: { ok: true, settlement_id: 'settlement-1', state: 'captured' },
+      }),
+      settlementsById: {
+        'settlement-1': {
+          ok: true,
+          settlement: {
+            id: 'settlement-1',
+            mandate_id: intent.mandateId,
+            state: 'captured',
+            amount_paise: 449_900,
+            merchant_id: 'demo-store-1',
+            cart_json: '{}',
+            reject_reason: null,
+            created_at: 1,
+          },
+          attempts: [
+            { state: 'captured', provider_payment_id: 'pay_1', receipt: 'r1', created_at: 1 },
+          ],
+          ledger: [],
+        },
+      },
+    })
+
+  it('resolves size + color order-insensitively (passed reversed vs the label)', async () => {
+    const { intent } = makeSignedIntent({ agent })
+    const state = capturedState(intent)
+    const { server } = buildServer(state, agent)
+    const client = await connectedClient(server)
+
+    const result = await client.callTool({
+      name: 'request_purchase',
+      arguments: {
+        merchant_id: 'demo-store-1',
+        sku: 'sneaker',
+        qty: 1,
+        mandate_id: intent.mandateId,
+        size: '11UK',
+        color: 'Leather Black',
+      },
+    })
+    expect(result.isError).toBeFalsy()
+    const body = jsonOf<{ state: string; variant_id: string }>(result)
+    expect(body.state).toBe('captured')
+    expect(body.variant_id).toBe('v-black-11')
+    expect(state.createSettlementCalls[0]?.cart.items[0]?.variant_id).toBe('v-black-11')
+  })
+
+  it('fails loud with VARIANT_NOT_FOUND for a nonexistent size and posts nothing', async () => {
+    const { intent } = makeSignedIntent({ agent })
+    const state = capturedState(intent)
+    const { server } = buildServer(state, agent)
+    const client = await connectedClient(server)
+
+    const result = await client.callTool({
+      name: 'request_purchase',
+      arguments: {
+        merchant_id: 'demo-store-1',
+        sku: 'sneaker',
+        qty: 1,
+        mandate_id: intent.mandateId,
+        size: '99UK',
+      },
+    })
+    const body = jsonOf<{ state: string; reason: string }>(result)
+    expect(body.state).toBe('rejected')
+    expect(body.reason).toBe('VARIANT_NOT_FOUND')
+    expect(state.createSettlementCalls).toHaveLength(0)
+  })
+
+  it('refuses MAX_PRICE_EXCEEDED when the catalog total is above max_price_paise, posting nothing', async () => {
+    const { intent } = makeSignedIntent({ agent })
+    const state = capturedState(intent)
+    const { server } = buildServer(state, agent)
+    const client = await connectedClient(server)
+
+    const result = await client.callTool({
+      name: 'request_purchase',
+      arguments: {
+        merchant_id: 'demo-store-1',
+        sku: 'sneaker',
+        qty: 1,
+        mandate_id: intent.mandateId,
+        variant_id: 'v-black-11',
+        max_price_paise: 400_000,
+      },
+    })
+    const body = jsonOf<{ state: string; reason: string }>(result)
+    expect(body.state).toBe('rejected')
+    expect(body.reason).toBe('MAX_PRICE_EXCEEDED')
+    expect(state.createSettlementCalls).toHaveLength(0)
+  })
+
+  it('uses a deterministic Idempotency-Key for identical purchases so a retry dedupes', async () => {
+    const { intent } = makeSignedIntent({ agent })
+    const state = capturedState(intent)
+    const { server } = buildServer(state, agent)
+    const client = await connectedClient(server)
+    const args = {
+      merchant_id: 'demo-store-1',
+      sku: 'sneaker',
+      qty: 1,
+      mandate_id: intent.mandateId,
+      variant_id: 'v-black-11',
+    }
+
+    await client.callTool({ name: 'request_purchase', arguments: args })
+    await client.callTool({ name: 'request_purchase', arguments: args })
+
+    expect(state.createSettlementCalls).toHaveLength(2)
+    expect(state.createSettlementCalls[0]?.idempotencyKey).toBe(
+      state.createSettlementCalls[1]?.idempotencyKey,
+    )
+  })
+})

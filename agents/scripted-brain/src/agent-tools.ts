@@ -65,6 +65,13 @@ export type CartDraft = {
   merchant_id: string
   items: CartItem[]
   total_paise: number
+  /** Optional stable cart id. When a caller wants a retry of the *same* purchase
+   * to be idempotent, it passes a deterministic id derived from the purchase
+   * intent (see request_purchase): identical id → identical signed cart →
+   * identical Idempotency-Key → the facilitator replays the first response
+   * instead of creating a second settlement. Omitted → a fresh random id per
+   * cart, the historical behaviour for brains that don't need retry dedup. */
+  cartId?: string
 }
 
 export type SettlementState =
@@ -138,7 +145,7 @@ export interface BuyerTools {
  * line carries `variantId`, the unit price and `variant_label` come from that
  * variant's own catalog data (never the product's flat `price_paise`) — this is
  * what makes a selected variant's price authoritative rather than assumed. */
-export function buildCartDraft(items: ReadonlyArray<CartLineInput>): CartDraft {
+export function buildCartDraft(items: ReadonlyArray<CartLineInput>, cartId?: string): CartDraft {
   const first = items[0]
   if (!first) throw new Error('buildCartDraft: at least one item is required')
   const merchantId = first.product.merchant_id
@@ -162,12 +169,12 @@ export function buildCartDraft(items: ReadonlyArray<CartLineInput>): CartDraft {
     }
   })
   const total_paise = cartItems.reduce((sum, item) => sum + item.qty * item.unit_price_paise, 0)
-  return { merchant_id: merchantId, items: cartItems, total_paise }
+  return { merchant_id: merchantId, items: cartItems, total_paise, ...(cartId ? { cartId } : {}) }
 }
 
 function signCart(draft: CartDraft, intent: IntentMandate, agent: AgentKeypair): CartMandate {
   const unsigned: Omit<CartMandate, 'agent_sig_hex'> = {
-    cartId: randomUUID(),
+    cartId: draft.cartId ?? randomUUID(),
     merchant_id: draft.merchant_id,
     items: draft.items,
     total_paise: draft.total_paise,
@@ -267,9 +274,15 @@ export class HttpBuyerTools implements BuyerTools {
   }): Promise<SettlementResult> {
     const cart = signCart(args.cart, args.intent, args.agent)
 
+    // Deterministic idempotency key: the hash of this cart's own signing bytes.
+    // Resubmitting the identical signed cart (e.g. a retry after an ambiguous
+    // network failure) reuses the key, so the facilitator replays the first
+    // response instead of creating a second settlement. A random key here would
+    // make every retry look new — the exact double-charge risk on a payment path.
+    const idempotencyKey = sha256Hex(cartSigningBytes(cart))
     const res = await fetch(`${this.facilitatorUrl}/settlements`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() },
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
       body: JSON.stringify({ intent: args.intent, cart }),
     })
     const body = (await res.json()) as SettlementCreateBody

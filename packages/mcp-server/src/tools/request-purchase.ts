@@ -13,6 +13,7 @@
  * the same code path every other buyer brain in this repo drives).
  */
 
+import { canonicalJson, sha256Hex } from '@hundi/core'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import type {
@@ -78,17 +79,36 @@ function describeVariants(variants: ProductVariant[]): string {
     .join('; ')
 }
 
-function findVariantMatch(variants: ProductVariant[], needle: string): ProductVariant | undefined {
+/** Does `variant` carry every requested option value? Each requested value must
+ * equal one of the variant's `option_values` (case-insensitive), matched to a
+ * DISTINCT position — so "Leather Black" + "11UK" resolves against a variant
+ * whose axes are ["Leather Black", "11UK"] regardless of the order they were
+ * passed in, and never false-matches on a substring or a shared position. This
+ * is the fix for order-sensitive label concatenation: size and color are matched
+ * against their own axes, not glued into one string and substring-searched. */
+function variantHasAllValues(variant: ProductVariant, values: string[]): boolean {
+  const remaining = variant.option_values.map((v) => v.trim().toLowerCase())
+  for (const value of values) {
+    const idx = remaining.indexOf(value.trim().toLowerCase())
+    if (idx === -1) return false
+    remaining.splice(idx, 1)
+  }
+  return true
+}
+
+/** Free-text fallback for a single `variant` string like "11 / Black" — exact
+ * label first, then substring on label or any option value. Only used when the
+ * caller passes `variant` rather than structured `size`/`color`. */
+function findVariantByText(variants: ProductVariant[], needle: string): ProductVariant | undefined {
+  const n = needle.trim().toLowerCase()
   const exact = variants.find(
-    (v) =>
-      v.label.toLowerCase() === needle ||
-      v.option_values.some((val) => val.toLowerCase() === needle),
+    (v) => v.label.toLowerCase() === n || v.option_values.some((val) => val.toLowerCase() === n),
   )
   if (exact) return exact
   return variants.find(
     (v) =>
-      v.label.toLowerCase().includes(needle) ||
-      v.option_values.some((val) => val.toLowerCase().includes(needle)),
+      v.label.toLowerCase().includes(n) ||
+      v.option_values.some((val) => val.toLowerCase().includes(n)),
   )
 }
 
@@ -96,11 +116,11 @@ type VariantResolution = { ok: true; variant?: ProductVariant } | { ok: false; e
 
 /**
  * Resolves the shopper's requested size/color against a product's real variant
- * list. Fails loud on a mismatch — an error listing what's actually available —
- * rather than silently buying the base SKU at the wrong size, per this tool's
- * own contract (see the tool description). No size/color/variant/variant_id
- * requested at all is a distinct, valid case: the product is bought with no
- * variant recorded, exactly as it always has been.
+ * list. Fails loud on a mismatch or an ambiguous request — an error listing
+ * what's actually available — rather than silently buying the base SKU at the
+ * wrong size, per this tool's own contract (see the tool description). No
+ * size/color/variant/variant_id requested at all is a distinct, valid case: the
+ * product is bought with no variant recorded, exactly as it always has been.
  */
 function resolveVariant(
   product: Product,
@@ -111,8 +131,11 @@ function resolveVariant(
     variant_id?: string | undefined
   },
 ): VariantResolution {
-  const requestedText = [args.size, args.color, args.variant].filter(Boolean).join(' ').trim()
-  const requestedSomething = args.variant_id !== undefined || requestedText.length > 0
+  const exactValues = [args.size, args.color].filter((v): v is string => !!v && v.trim().length > 0)
+  const requestedSomething =
+    args.variant_id !== undefined ||
+    exactValues.length > 0 ||
+    (args.variant !== undefined && args.variant.trim().length > 0)
 
   if (!product.variants || product.variants.length === 0) {
     if (!requestedSomething) return { ok: true }
@@ -137,12 +160,34 @@ function resolveVariant(
     }
   }
 
-  const match = findVariantMatch(product.variants, requestedText.toLowerCase())
+  // Structured size/color: match each value against its own axis, order-insensitively.
+  if (exactValues.length > 0) {
+    const matches = product.variants.filter((v) => variantHasAllValues(v, exactValues))
+    const only = matches[0]
+    if (matches.length === 1 && only) return { ok: true, variant: only }
+    if (matches.length > 1) {
+      return {
+        ok: false,
+        error:
+          `"${exactValues.join(' + ')}" matches ${matches.length} variants on "${product.title}" ` +
+          `— specify all axes (e.g. both size and color). Matching: ${describeVariants(matches)}.`,
+      }
+    }
+    return {
+      ok: false,
+      error:
+        `No variant on "${product.title}" has ${exactValues.map((v) => `"${v}"`).join(' + ')}. ` +
+        `Available: ${describeVariants(product.variants)}.`,
+    }
+  }
+
+  // Only a free-text `variant` string was given.
+  const match = args.variant ? findVariantByText(product.variants, args.variant) : undefined
   if (match) return { ok: true, variant: match }
   return {
     ok: false,
     error:
-      `No "${requestedText}" option on "${product.title}". Available: ` +
+      `No "${args.variant}" option on "${product.title}". Available: ` +
       `${describeVariants(product.variants)}.`,
   }
 }
@@ -208,9 +253,30 @@ export function registerRequestPurchaseTool(
             'The exact variant_id from search_products, when known — takes precedence over ' +
               'size/color/variant.',
           ),
+        max_price_paise: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            'Optional upper bound (in paise) on the cart total you are willing to spend — pass ' +
+              'the exact figure you quoted the user. If the fresh catalog total exceeds it, the ' +
+              'purchase is refused before signing, so a price that moved between your quote and ' +
+              "this call can't capture silently.",
+          ),
       },
     },
-    async ({ merchant_id, sku, qty, mandate_id, size, color, variant, variant_id }) => {
+    async ({
+      merchant_id,
+      sku,
+      qty,
+      mandate_id,
+      size,
+      color,
+      variant,
+      variant_id,
+      max_price_paise,
+    }) => {
       const mandates = await deps.facilitatorClient.listMandates()
       const record = findAuthorizedMandate(
         mandates,
@@ -231,13 +297,46 @@ export function registerRequestPurchaseTool(
         })
       }
 
-      const cart = buildCartDraft([
-        {
-          product,
+      // Deterministic cart id derived from the purchase intent, so an agent that
+      // retries the SAME purchase (e.g. after an ambiguous timeout) produces a
+      // byte-identical signed cart → identical Idempotency-Key → the facilitator
+      // replays the first response instead of charging twice. Two genuinely
+      // different purchases (different sku/variant/qty/mandate) get distinct ids.
+      const cartId = sha256Hex(
+        canonicalJson({
+          mandate_id,
+          sku,
           qty,
-          ...(resolution.variant ? { variantId: resolution.variant.variant_id } : {}),
-        },
-      ])
+          variant_id: resolution.variant?.variant_id ?? null,
+        }),
+      )
+
+      const cart = buildCartDraft(
+        [
+          {
+            product,
+            qty,
+            ...(resolution.variant ? { variantId: resolution.variant.variant_id } : {}),
+          },
+        ],
+        cartId,
+      )
+
+      // Client-side price bound (§ max_price_paise): the facilitator already
+      // rejects a price that disagrees with its catalog (PRICE_MISMATCH); this
+      // additionally pins the spend to the number the agent showed the user, so a
+      // legitimate catalog price rise can't capture above what was quoted.
+      if (max_price_paise !== undefined && cart.total_paise > max_price_paise) {
+        return jsonResult({
+          state: 'rejected',
+          reason: 'MAX_PRICE_EXCEEDED',
+          message:
+            `The current total for ${qty} x "${product.title}" is ${formatRupees(cart.total_paise)}, ` +
+            `above your max of ${formatRupees(max_price_paise)}. Nothing was charged. Re-confirm ` +
+            'the new price with the user before retrying.',
+        })
+      }
+
       const result = await deps.buyerTools.requestPayment({
         intent: record.intent,
         cart,

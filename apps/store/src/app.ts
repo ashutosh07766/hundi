@@ -81,8 +81,41 @@ function productCard(product: Product): string {
 </li>`
 }
 
+/** Deterministic brand→gradient so every product tile is stable across reloads
+ * (important for a clean screen-recording) and self-served — no external image
+ * host to fail on camera. */
+function brandColors(brand: string): [string, string] {
+  const palettes: [string, string][] = [
+    ['#1e3a8a', '#3b82f6'], ['#065f46', '#10b981'], ['#7c2d12', '#f97316'],
+    ['#581c87', '#a855f7'], ['#831843', '#ec4899'], ['#134e4a', '#14b8a6'],
+  ]
+  let h = 0
+  for (const ch of brand) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  return palettes[h % palettes.length]!
+}
+
+function productImageSvg(product: Product): string {
+  const [c1, c2] = brandColors(product.brand)
+  const name = escapeHtml(product.title)
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 600 600">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/>
+  </linearGradient></defs>
+  <rect width="600" height="600" fill="url(#g)"/>
+  <text x="300" y="330" font-size="230" text-anchor="middle">👟</text>
+  <text x="300" y="470" font-size="34" font-family="system-ui,sans-serif" font-weight="600"
+        fill="#ffffff" text-anchor="middle">${name}</text>
+</svg>`
+}
+
 export function createApp(): Hono {
   const app = new Hono()
+
+  app.get('/img/:id', (c) => {
+    const product = catalog.find((p) => p.id === c.req.param('id'))
+    if (!product) return c.text('not found', 404)
+    return c.body(productImageSvg(product), 200, { 'content-type': 'image/svg+xml' })
+  })
 
   app.get('/', (c) => {
     const items = catalog.map(productCard).join('\n')

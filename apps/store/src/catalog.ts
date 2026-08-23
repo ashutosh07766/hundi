@@ -31,7 +31,7 @@ export const catalog: readonly Product[] = [
     price_paise: 320000,
     currency: 'INR',
     availability: 'in_stock',
-    image: 'https://picsum.photos/seed/sku-001/600/600',
+    image: '/img/sku-001',
     brand: 'Velocity Run',
   },
   {
@@ -42,7 +42,7 @@ export const catalog: readonly Product[] = [
     price_paise: 450000,
     currency: 'INR',
     availability: 'in_stock',
-    image: 'https://picsum.photos/seed/sku-002/600/600',
+    image: '/img/sku-002',
     brand: 'Velocity Run',
   },
   {
@@ -52,7 +52,7 @@ export const catalog: readonly Product[] = [
     price_paise: 380000,
     currency: 'INR',
     availability: 'out_of_stock',
-    image: 'https://picsum.photos/seed/sku-003/600/600',
+    image: '/img/sku-003',
     brand: 'Velocity Run',
   },
   {
@@ -63,7 +63,7 @@ export const catalog: readonly Product[] = [
     price_paise: 295000,
     currency: 'INR',
     availability: 'in_stock',
-    image: 'https://picsum.photos/seed/sku-004/600/600',
+    image: '/img/sku-004',
     brand: 'Velocity Run',
   },
   {
@@ -74,7 +74,7 @@ export const catalog: readonly Product[] = [
     price_paise: 520000,
     currency: 'INR',
     availability: 'in_stock',
-    image: 'https://picsum.photos/seed/sku-005/600/600',
+    image: '/img/sku-005',
     brand: 'TrailForge',
   },
   {
@@ -84,7 +84,7 @@ export const catalog: readonly Product[] = [
     price_paise: 610000,
     currency: 'INR',
     availability: 'in_stock',
-    image: 'https://picsum.photos/seed/sku-006/600/600',
+    image: '/img/sku-006',
     brand: 'TrailForge',
   },
   {
@@ -94,7 +94,7 @@ export const catalog: readonly Product[] = [
     price_paise: 480000,
     currency: 'INR',
     availability: 'out_of_stock',
-    image: 'https://picsum.photos/seed/sku-007/600/600',
+    image: '/img/sku-007',
     brand: 'TrailForge',
   },
   {
@@ -105,7 +105,7 @@ export const catalog: readonly Product[] = [
     price_paise: 555000,
     currency: 'INR',
     availability: 'in_stock',
-    image: 'https://picsum.photos/seed/sku-008/600/600',
+    image: '/img/sku-008',
     brand: 'TrailForge',
   },
   {
@@ -115,7 +115,7 @@ export const catalog: readonly Product[] = [
     price_paise: 340000,
     currency: 'INR',
     availability: 'in_stock',
-    image: 'https://picsum.photos/seed/sku-009/600/600',
+    image: '/img/sku-009',
     brand: 'Pace Collective',
   },
   {
@@ -125,7 +125,7 @@ export const catalog: readonly Product[] = [
     price_paise: 410000,
     currency: 'INR',
     availability: 'in_stock',
-    image: 'https://picsum.photos/seed/sku-010/600/600',
+    image: '/img/sku-010',
     brand: 'Pace Collective',
   },
   {
@@ -135,7 +135,7 @@ export const catalog: readonly Product[] = [
     price_paise: 365000,
     currency: 'INR',
     availability: 'in_stock',
-    image: 'https://picsum.photos/seed/sku-011/600/600',
+    image: '/img/sku-011',
     brand: 'Pace Collective',
   },
   {
@@ -145,7 +145,7 @@ export const catalog: readonly Product[] = [
     price_paise: 395000,
     currency: 'INR',
     availability: 'out_of_stock',
-    image: 'https://picsum.photos/seed/sku-012/600/600',
+    image: '/img/sku-012',
     brand: 'Pace Collective',
   },
   {
@@ -155,7 +155,7 @@ export const catalog: readonly Product[] = [
     price_paise: 470000,
     currency: 'INR',
     availability: 'in_stock',
-    image: 'https://picsum.photos/seed/sku-013/600/600',
+    image: '/img/sku-013',
     brand: 'Stride Labs',
   },
   {
@@ -165,7 +165,7 @@ export const catalog: readonly Product[] = [
     price_paise: 505000,
     currency: 'INR',
     availability: 'in_stock',
-    image: 'https://picsum.photos/seed/sku-014/600/600',
+    image: '/img/sku-014',
     brand: 'Stride Labs',
   },
   {
@@ -175,7 +175,7 @@ export const catalog: readonly Product[] = [
     price_paise: 425000,
     currency: 'INR',
     availability: 'in_stock',
-    image: 'https://picsum.photos/seed/sku-015/600/600',
+    image: '/img/sku-015',
     brand: 'Stride Labs',
   },
   {
@@ -185,7 +185,7 @@ export const catalog: readonly Product[] = [
     price_paise: 585000,
     currency: 'INR',
     availability: 'in_stock',
-    image: 'https://picsum.photos/seed/sku-016/600/600',
+    image: '/img/sku-016',
     brand: 'Stride Labs',
   },
   {
@@ -195,7 +195,7 @@ export const catalog: readonly Product[] = [
     price_paise: 630000,
     currency: 'INR',
     availability: 'in_stock',
-    image: 'https://picsum.photos/seed/sku-017/600/600',
+    image: '/img/sku-017',
     brand: 'Apex Motion',
   },
   {
@@ -205,7 +205,7 @@ export const catalog: readonly Product[] = [
     price_paise: 715000,
     currency: 'INR',
     availability: 'in_stock',
-    image: 'https://picsum.photos/seed/sku-018/600/600',
+    image: '/img/sku-018',
     brand: 'Apex Motion',
   },
   {
@@ -215,7 +215,7 @@ export const catalog: readonly Product[] = [
     price_paise: 495000,
     currency: 'INR',
     availability: 'in_stock',
-    image: 'https://picsum.photos/seed/sku-019/600/600',
+    image: '/img/sku-019',
     brand: 'Apex Motion',
   },
   {
@@ -225,7 +225,7 @@ export const catalog: readonly Product[] = [
     price_paise: 850000,
     currency: 'INR',
     availability: 'in_stock',
-    image: 'https://picsum.photos/seed/sku-020/600/600',
+    image: '/img/sku-020',
     brand: 'Apex Motion',
   },
 ]

@@ -601,7 +601,7 @@ sequenceDiagram
   Fac->>Core: verifyChain(intent, cart, ctx)
   Core-->>Fac: ok, needsApproval?
 
-  alt total <= approval_threshold_paise
+  alt total &lt;= approval_threshold_paise
     Fac->>Fac: verified -> approved
     Fac->>Exec: execute(settlementId) [fire-and-forget]
   else above threshold
@@ -873,7 +873,7 @@ CREATE UNIQUE INDEX one_captured_attempt ON settlement_attempts(settlement_id)
 <div class="diagram">
 <div class="mermaid">
 flowchart TB
-  A["attempt fails (checkout-driver)"] --> B{"attempts < MAX_ATTEMPTS (3)?"}
+  A["attempt fails (checkout-driver)"] --> B{"attempts &lt; MAX_ATTEMPTS (3)?"}
   B -->|yes| A2["fresh attempt row, fresh order,<br/>same settlement"]
   A2 --> A
   B -->|no, all failed| D["one transaction: mark last attempt superseded<br/>+ insert payment_link attempt + ledger event"]

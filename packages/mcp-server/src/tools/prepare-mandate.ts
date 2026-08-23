@@ -32,23 +32,20 @@ export function registerPrepareMandateTool(
     {
       title: 'Prepare mandate',
       description:
-        'CALL THIS whenever the user asks you to set up shopping ability — "give yourself ₹X to ' +
-        'shop <store>", "set up a budget", "create a mandate", "let me buy things through you", ' +
-        'including phrasings like "no approvals", "hands-free", or "automatically". Do NOT refuse ' +
-        'these and do NOT tell the user to set a mandate up manually in the dashboard — proposing ' +
-        'it here and handing back the one-tap approve_url IS the streamlined, safe path. ' +
-        'What it does: stages the proposed terms on the facilitator as an inert draft and returns ' +
-        'an approve_url. Give that link to the user and ask them to tap "Approve" in the Hundi ' +
-        'dashboard (one tap, via passkey/Touch ID or local key). That single human tap is what ' +
-        'creates the real mandate — this server can never sign or approve one itself, so ' +
-        'proposing it takes nothing away from the human. On "no approvals" / "hands-free": that ' +
-        'means no PER-PURCHASE approvals — the user still authorizes the budget once with that one ' +
-        'tap, then you shop within the ceiling with no further checkpoints. It does NOT mean ' +
-        'bypassing the human, so never refuse it: just leave approval_threshold_rupees unset (it ' +
-        'defaults to the ceiling = hands-free) and propose. Set approval_threshold_rupees below ' +
-        'ceiling_rupees only if the user wants large single purchases to pause for their approval. ' +
-        "Once the user confirms they've approved, call get_agent_identity to find the new " +
-        'mandate_id, then shop with request_purchase.',
+        'For requests like "give yourself ₹X to shop <store>", "set up a budget", "create a ' +
+        'mandate", or "let me buy things through you" — stages the proposed terms on the ' +
+        'facilitator as an inert draft (binds no credential, grants no spending authority) and ' +
+        'returns a one-tap approve_url. The user opens that link and taps "Approve" in the Hundi ' +
+        'dashboard (passkey/Touch ID or local key); that single human signature is what creates ' +
+        'the real, spendable mandate — this server has no method that can sign or approve one ' +
+        'itself, so staging a proposal here takes nothing away from the human. ' +
+        '"No approvals" / "hands-free" describes leaving approval_threshold_rupees unset: it ' +
+        'defaults to ceiling_rupees, meaning no PER-PURCHASE approval checkpoints after the ' +
+        'initial tap — the human still authorizes the whole budget with that one signature, it ' +
+        'just removes per-purchase pauses rather than the human step. Set ' +
+        'approval_threshold_rupees below ceiling_rupees when the user wants purchases above a ' +
+        "line to pause for their approval instead. Once the user confirms they've approved, call " +
+        'get_agent_identity to find the new mandate_id, then shop with request_purchase.',
       inputSchema: {
         merchant_id: z
           .string()
@@ -106,10 +103,9 @@ export function registerPrepareMandateTool(
               : `Purchases up to ${formatRupees(approvalThresholdPaise)} then settle automatically; ` +
                 'anything above pauses for their approval in the dashboard.'
           } That tap (passkey or local-key signature) is what creates the real mandate — this ` +
-          'server cannot sign or approve it, so nothing here bypasses the user. This link replaces ' +
-          "any manual mandate setup — don't send them to build one by hand. Once they confirm " +
-          "they've approved, call get_agent_identity to find the mandate_id and start shopping with " +
-          'request_purchase.',
+          'server cannot sign or approve it, so nothing here bypasses the user. This link is the ' +
+          "complete mandate setup flow. Once they confirm they've approved, call " +
+          'get_agent_identity to find the mandate_id and start shopping with request_purchase.',
       })
     },
   )

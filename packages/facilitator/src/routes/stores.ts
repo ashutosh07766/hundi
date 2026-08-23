@@ -12,7 +12,7 @@
  */
 
 import { zValidator } from '@hono/zod-validator'
-import { deriveMerchantId, scanStore as defaultScanStore } from '@hundi/cli/scanner'
+import { scanStore as defaultScanStore, deriveMerchantId } from '@hundi/cli/scanner'
 import type { Hono } from 'hono'
 import type { AppDeps } from '../app.js'
 import { browserScanShopify as defaultBrowserScan } from '../browser-scan.js'
@@ -82,8 +82,7 @@ export function registerStoreRoutes(app: Hono, deps: AppDeps): void {
             ok: false,
             error: scanError ? 'SCAN_FAILED' : 'NO_PRODUCTS',
             detail:
-              scanError ??
-              'store exposes no schema.org product markup and no Shopify product feed',
+              scanError ?? 'store exposes no schema.org product markup and no Shopify product feed',
           },
           200,
         )

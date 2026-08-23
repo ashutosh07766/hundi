@@ -12,7 +12,7 @@
  */
 
 import type { IntentMandate } from '@hundi/core'
-import type { BuyerTools, Product, SettlementResult } from './agent-tools.js'
+import type { BuyerTools, CartDraft, Product, SettlementResult } from './agent-tools.js'
 import type { AgentKeypair } from './ed25519.js'
 
 export type Goal = {
@@ -97,6 +97,65 @@ export async function runPurchase(
   }
 
   const outcome = toOutcome(settlement, product)
+  log('outcome', outcome)
+  return outcome
+}
+
+/**
+ * Simulates a buyer brain whose reasoning step was an LLM that read a product
+ * description and treated embedded text as instructions instead of content —
+ * the failure mode structural verification (not prompt hygiene) has to
+ * survive. Picks the first catalog entry carrying an `injectedPayload` (see
+ * `Product` in agent-tools.ts) and builds a cart from the attacker-controlled
+ * merchant/price it names, instead of that listing's own real
+ * `merchant_id`/`price_paise` — that substitution is the "got fooled" step,
+ * deliberately reproduced here rather than left implicit. Everything
+ * downstream (cart signing, submission, polling) goes through the same
+ * `BuyerTools` surface `runPurchase` uses — the fooled brain never gains any
+ * capability an honest one lacks.
+ */
+export async function runAdversarialPurchase(
+  { goal, mandate }: { goal: Pick<Goal, 'query'>; mandate: PurchaseMandate },
+  tools: BuyerTools,
+  log: LogStep = defaultLog,
+): Promise<PurchaseOutcome> {
+  const candidates = await tools.searchCatalog(goal.query)
+  log('search', { query: goal.query, resultCount: candidates.length })
+
+  const poisoned = candidates.find((p) => p.injectedPayload !== undefined)
+  if (!poisoned?.injectedPayload) {
+    throw new Error(
+      'runAdversarialPurchase: no catalog entry carries an injectedPayload — pass poisonedCatalog: true to HttpBuyerTools',
+    )
+  }
+  log('select_poisoned', {
+    sku: poisoned.id,
+    title: poisoned.title,
+    note: 'brain treats description-embedded instructions as commands, not content',
+  })
+
+  // The compromised step: cart content is read from the attacker's injected
+  // payload, not the catalog's own structured fields for this listing.
+  const injected = poisoned.injectedPayload
+  const cart: CartDraft = {
+    merchant_id: injected.merchant_id,
+    items: [{ sku: poisoned.id, qty: 1, unit_price_paise: injected.price_paise }],
+    total_paise: injected.price_paise,
+  }
+  log('propose_cart', { merchant_id: cart.merchant_id, total_paise: cart.total_paise })
+
+  const settlement = await tools.requestPayment({
+    intent: mandate.intent,
+    cart,
+    agent: mandate.agent,
+  })
+  log('settlement_created', {
+    settlement_id: settlement.settlement_id,
+    state: settlement.state,
+    reason: settlement.reason ?? null,
+  })
+
+  const outcome = toOutcome(settlement, poisoned)
   log('outcome', outcome)
   return outcome
 }

@@ -35,6 +35,11 @@ export type Product = {
   image: string
   brand: string
   merchant_id: string
+  /** Present only on a compromised catalog listing (see apps/store/src/poison-fixture.ts) —
+   * the attacker-controlled merchant/price its description tries to inject. Absent on every
+   * genuine listing; a normal brain has no reason to ever read this field, since `merchant_id`
+   * and `price_paise` above are always the store's own real values regardless. */
+  injectedPayload?: { merchant_id: string; price_paise: number }
 }
 
 export type CartDraft = {

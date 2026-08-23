@@ -307,6 +307,158 @@ describe('request_purchase', () => {
     expect(result.isError).toBe(true)
     expect(state.createSettlementCalls).toHaveLength(0)
   })
+
+  describe('variant resolution', () => {
+    const variantProduct = () =>
+      catalogProduct({
+        id: 'shoes-1',
+        title: 'Active Walking Shoes',
+        price_paise: 320_000,
+        variants: [
+          {
+            variant_id: 'v-9',
+            label: '9',
+            option_values: ['9'],
+            price_paise: 300_000,
+            available: true,
+          },
+          {
+            variant_id: 'v-11',
+            label: '11',
+            option_values: ['11'],
+            price_paise: 320_000,
+            available: true,
+          },
+        ],
+      })
+
+    it('rejects a requested size that does not exist, lists real sizes, and builds no cart', async () => {
+      const { intent } = makeSignedIntent({ agent })
+      const state = makeFakeFacilitatorState({
+        catalogs: { 'demo-store-1': [variantProduct()] },
+        mandates: [mandateRow({ mandateId: intent.mandateId, intent })],
+      })
+      const { server } = buildServer(state, agent)
+      const client = await connectedClient(server)
+
+      const result = await client.callTool({
+        name: 'request_purchase',
+        arguments: {
+          merchant_id: 'demo-store-1',
+          sku: 'shoes-1',
+          mandate_id: intent.mandateId,
+          size: '13',
+        },
+      })
+      expect(result.isError).toBeFalsy()
+      const body = jsonOf<{ state: string; reason: string; message: string }>(result)
+      expect(body.state).toBe('rejected')
+      expect(body.reason).toBe('VARIANT_NOT_FOUND')
+      expect(body.message).toContain('9')
+      expect(body.message).toContain('11')
+      expect(state.createSettlementCalls).toHaveLength(0)
+    })
+
+    it('resolves a requested size to its variant_id/variant_label and prices from the variant', async () => {
+      const { intent } = makeSignedIntent({ agent })
+      const state = makeFakeFacilitatorState({
+        catalogs: { 'demo-store-1': [variantProduct()] },
+        mandates: [mandateRow({ mandateId: intent.mandateId, intent })],
+        onCreateSettlement: () => ({
+          status: 202,
+          body: { ok: true, settlement_id: 'settlement-variant-1', state: 'captured' },
+        }),
+        settlementsById: {
+          'settlement-variant-1': {
+            ok: true,
+            settlement: {
+              id: 'settlement-variant-1',
+              mandate_id: intent.mandateId,
+              state: 'captured',
+              amount_paise: 300_000,
+              merchant_id: 'demo-store-1',
+              cart_json: '{}',
+              reject_reason: null,
+              created_at: 1,
+            },
+            attempts: [
+              { state: 'captured', provider_payment_id: 'pay_v1', receipt: 'r1', created_at: 1 },
+            ],
+            ledger: [],
+          },
+        },
+      })
+      const { server } = buildServer(state, agent)
+      const client = await connectedClient(server)
+
+      const result = await client.callTool({
+        name: 'request_purchase',
+        arguments: {
+          merchant_id: 'demo-store-1',
+          sku: 'shoes-1',
+          mandate_id: intent.mandateId,
+          size: '9',
+        },
+      })
+      expect(result.isError).toBeFalsy()
+      const body = jsonOf<{ state: string; variant_id: string; variant_label: string }>(result)
+      expect(body.state).toBe('captured')
+      expect(body.variant_id).toBe('v-9')
+      expect(body.variant_label).toBe('9')
+
+      expect(state.createSettlementCalls).toHaveLength(1)
+      const call = state.createSettlementCalls[0]
+      if (!call) throw new Error('expected a POST /settlements call to have been recorded')
+      // Priced from the variant (300_000), not the product's flat price_paise (320_000).
+      expect(call.cart.total_paise).toBe(300_000)
+      expect(call.cart.items[0]).toMatchObject({ variant_id: 'v-9', variant_label: '9' })
+    })
+
+    it('buys the base product with no variant recorded when no size/color/variant is requested (unchanged behavior)', async () => {
+      const { intent } = makeSignedIntent({ agent })
+      const state = makeFakeFacilitatorState({
+        catalogs: { 'demo-store-1': [variantProduct()] },
+        mandates: [mandateRow({ mandateId: intent.mandateId, intent })],
+        onCreateSettlement: () => ({
+          status: 202,
+          body: { ok: true, settlement_id: 'settlement-variant-2', state: 'captured' },
+        }),
+        settlementsById: {
+          'settlement-variant-2': {
+            ok: true,
+            settlement: {
+              id: 'settlement-variant-2',
+              mandate_id: intent.mandateId,
+              state: 'captured',
+              amount_paise: 320_000,
+              merchant_id: 'demo-store-1',
+              cart_json: '{}',
+              reject_reason: null,
+              created_at: 1,
+            },
+            attempts: [
+              { state: 'captured', provider_payment_id: 'pay_v2', receipt: 'r1', created_at: 1 },
+            ],
+            ledger: [],
+          },
+        },
+      })
+      const { server } = buildServer(state, agent)
+      const client = await connectedClient(server)
+
+      const result = await client.callTool({
+        name: 'request_purchase',
+        arguments: { merchant_id: 'demo-store-1', sku: 'shoes-1', mandate_id: intent.mandateId },
+      })
+      expect(result.isError).toBeFalsy()
+
+      expect(state.createSettlementCalls).toHaveLength(1)
+      const call = state.createSettlementCalls[0]
+      if (!call) throw new Error('expected a POST /settlements call to have been recorded')
+      expect(call.cart.total_paise).toBe(320_000)
+      expect(call.cart.items[0]).not.toHaveProperty('variant_id')
+    })
+  })
 })
 
 describe('get_order', () => {

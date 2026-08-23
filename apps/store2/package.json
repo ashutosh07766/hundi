@@ -1,0 +1,21 @@
+{
+  "name": "@hundi/store2",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsx src/build.ts",
+    "serve": "tsx src/serve.ts",
+    "pretypecheck": "pnpm --filter @hundi/cli build",
+    "typecheck": "tsc --noEmit",
+    "pretest": "pnpm --filter @hundi/cli build",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@hundi/cli": "workspace:*",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "tsx": "^4.20.0",
+    "vitest": "^4.0.0"
+  }
+}

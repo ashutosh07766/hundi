@@ -265,3 +265,64 @@ describe('POST /settlements — catalog price check', () => {
     expect(json).toMatchObject({ ok: true, state: 'rejected', reason: 'PRICE_MISMATCH' })
   })
 })
+
+describe('POST /settlements — variant carts survive ingest', () => {
+  it('preserves variant_id so a signed variant cart verifies (regression: SIG_INVALID_CART)', async () => {
+    const { app, db } = makeTestApp()
+    const { intent, agent } = makeIntent()
+    await registerMandate(app, intent, credentialFor(agent))
+
+    // Matching catalog price so the only check that could reject this cart is the
+    // signature — isolating the regression this test guards.
+    const adminRes = await postJson(
+      app,
+      '/admin/merchants',
+      {
+        merchant_id: 'merchant-1',
+        name: 'Merchant One',
+        config: { catalogPrices: { 'sku-1': 100_000 } },
+      },
+      { 'x-hundi-admin-token': TEST_ENV.ADMIN_TOKEN },
+    )
+    expect(adminRes.status).toBe(201)
+
+    const cart = makeCart({
+      agent,
+      intent,
+      items: [
+        {
+          sku: 'sku-1',
+          qty: 1,
+          unit_price_paise: 100_000,
+          variant_id: 'v-11uk',
+          variant_label: 'Black / 11UK',
+        },
+      ],
+      overrides: { cartId: 'variant-cart' },
+    })
+    const res = await postJson(
+      app,
+      '/settlements',
+      { intent, cart },
+      { 'Idempotency-Key': 'idem-variant' },
+    )
+
+    expect(res.status).toBe(202)
+    const json = await res.json()
+    // The bug: the ingest schema stripped variant_id, so the recomputed signing
+    // bytes no longer matched the agent's signature and this rejected with
+    // SIG_INVALID_CART. The signed variant cart must get past verification.
+    expect(json).not.toMatchObject({ state: 'rejected', reason: 'SIG_INVALID_CART' })
+
+    // And the chosen variant is preserved in the stored cart, so the record carries the size.
+    const row = db.prepare('SELECT cart_json FROM settlements ORDER BY rowid DESC LIMIT 1').get() as
+      | { cart_json: string }
+      | undefined
+    expect(row).toBeDefined()
+    const storedCart = JSON.parse((row as { cart_json: string }).cart_json)
+    expect(storedCart.items[0]).toMatchObject({
+      variant_id: 'v-11uk',
+      variant_label: 'Black / 11UK',
+    })
+  })
+})

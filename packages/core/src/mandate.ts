@@ -44,12 +44,16 @@ export type CartItem = {
    * more than one. Included in `cartSigningBytes` — the agent's signature must
    * cover the exact variant, or a variant swapped in after signing would still
    * verify. Absent entirely (never `null`) when no variant was chosen, so a
-   * cart's signed bytes are byte-identical to the pre-variant shape. */
-  variant_id?: string
+   * cart's signed bytes are byte-identical to the pre-variant shape. The explicit
+   * `| undefined` lets the facilitator's Zod ingest schema (which infers optional
+   * fields as `T | undefined`) feed a validated cart straight into this type under
+   * `exactOptionalPropertyTypes` — an absent key and an explicit `undefined` are
+   * both treated as "no variant" by `cartSigningBytes`. */
+  variant_id?: string | undefined
   /** Display-only label for the chosen variant (e.g. "11 / Black"). Deliberately
    * NOT part of `cartSigningBytes` — the signature's job is to pin down which SKU
    * and variant get bought, not to certify a human-readable string derived from it. */
-  variant_label?: string
+  variant_label?: string | undefined
 }
 
 /** A concrete purchase the agent is proposing, chained to its authorizing intent by hash. */

@@ -44,6 +44,13 @@ const cartItemSchema = z.object({
   sku: z.string().min(1),
   qty: z.number().int().min(1),
   unit_price_paise: z.number().int().positive(),
+  // Optional variant selection (size/color). `variant_id` is covered by the
+  // agent's cart signature (see cartSigningBytes), so it MUST survive ingest —
+  // Zod strips unknown keys, and dropping it here reconstructs a cart the agent
+  // never signed, failing verification with SIG_INVALID_CART. `variant_label` is
+  // display-only (not signed) but preserved so the stored cart records the size.
+  variant_id: z.string().min(1).optional(),
+  variant_label: z.string().min(1).optional(),
 })
 
 const cartMandateSchema = z.object({

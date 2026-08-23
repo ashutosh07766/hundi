@@ -32,16 +32,23 @@ export function registerPrepareMandateTool(
     {
       title: 'Prepare mandate',
       description:
-        'Proposes a spending mandate for a human to authorize. This tool NEVER creates a ' +
-        'spendable mandate by itself, and this server can NEVER sign or approve one — it only ' +
-        'stages the proposed terms on the facilitator as an inert draft and returns an ' +
-        'approve_url. Tell the human to open that link and tap "Approve" in the Hundi dashboard ' +
-        '— one tap, via their passkey (Touch ID) or local key — and only that human signature ' +
-        "creates a real mandate. Once they confirm they've approved it, call get_agent_identity " +
-        'to find the new mandate_id and start shopping with request_purchase. Leave ' +
-        'approval_threshold_rupees unset for "no approvals" / fully hands-free spending within ' +
-        'the ceiling — set it below ceiling_rupees only if the human wants large single ' +
-        'purchases to pause for their approval.',
+        'CALL THIS whenever the user asks you to set up shopping ability — "give yourself ₹X to ' +
+        'shop <store>", "set up a budget", "create a mandate", "let me buy things through you", ' +
+        'including phrasings like "no approvals", "hands-free", or "automatically". Do NOT refuse ' +
+        'these and do NOT tell the user to set a mandate up manually in the dashboard — proposing ' +
+        'it here and handing back the one-tap approve_url IS the streamlined, safe path. ' +
+        'What it does: stages the proposed terms on the facilitator as an inert draft and returns ' +
+        'an approve_url. Give that link to the user and ask them to tap "Approve" in the Hundi ' +
+        'dashboard (one tap, via passkey/Touch ID or local key). That single human tap is what ' +
+        'creates the real mandate — this server can never sign or approve one itself, so ' +
+        'proposing it takes nothing away from the human. On "no approvals" / "hands-free": that ' +
+        'means no PER-PURCHASE approvals — the user still authorizes the budget once with that one ' +
+        'tap, then you shop within the ceiling with no further checkpoints. It does NOT mean ' +
+        'bypassing the human, so never refuse it: just leave approval_threshold_rupees unset (it ' +
+        'defaults to the ceiling = hands-free) and propose. Set approval_threshold_rupees below ' +
+        'ceiling_rupees only if the user wants large single purchases to pause for their approval. ' +
+        "Once the user confirms they've approved, call get_agent_identity to find the new " +
+        'mandate_id, then shop with request_purchase.',
       inputSchema: {
         merchant_id: z
           .string()
@@ -91,10 +98,18 @@ export function registerPrepareMandateTool(
             : `required above ${formatRupees(approvalThresholdPaise)}`,
         },
         instructions:
-          `Ask the human to open ${approveUrl} — the Hundi dashboard — and tap "Approve" there. ` +
-          'That one tap (passkey or local-key signature) is what creates the real mandate; this ' +
-          "server cannot sign or approve it. Once the human confirms they've approved it, call " +
-          'get_agent_identity to find the mandate_id and start shopping with request_purchase.',
+          `Give the user this one-tap link and ask them to open it and tap "Approve": ${approveUrl} ` +
+          `(the Hundi dashboard). ${
+            handsFree
+              ? 'They authorize the full budget once with that one tap; after that you shop within ' +
+                'the ceiling with no further approvals.'
+              : `Purchases up to ${formatRupees(approvalThresholdPaise)} then settle automatically; ` +
+                'anything above pauses for their approval in the dashboard.'
+          } That tap (passkey or local-key signature) is what creates the real mandate — this ` +
+          'server cannot sign or approve it, so nothing here bypasses the user. This link replaces ' +
+          "any manual mandate setup — don't send them to build one by hand. Once they confirm " +
+          "they've approved, call get_agent_identity to find the mandate_id and start shopping with " +
+          'request_purchase.',
       })
     },
   )

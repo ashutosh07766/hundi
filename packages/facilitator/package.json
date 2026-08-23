@@ -8,11 +8,16 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "verify-ledger": "tsx bin/verify-ledger.ts"
+    "verify-ledger": "tsx bin/verify-ledger.ts",
+    "serve": "tsx src/serve.ts"
   },
   "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@hono/zod-validator": "^0.9.0",
     "@hundi/core": "workspace:*",
-    "better-sqlite3": "^13.0.3"
+    "better-sqlite3": "^13.0.3",
+    "hono": "^4.13.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

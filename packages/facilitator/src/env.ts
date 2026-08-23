@@ -1,0 +1,38 @@
+/**
+ * Boot-time environment validation. Every credential and port the HTTP
+ * surface needs is read once here and passed down as a typed `Env` object —
+ * nothing downstream reads `process.env` directly, so a missing secret
+ * fails at startup with a readable message instead of surfacing as a
+ * mysterious 401/undefined deep in a request handler.
+ */
+
+import { z } from 'zod'
+
+const envSchema = z.object({
+  RAZORPAY_KEY_ID: z.string().min(1, 'RAZORPAY_KEY_ID is required'),
+  RAZORPAY_KEY_SECRET: z.string().min(1, 'RAZORPAY_KEY_SECRET is required'),
+  RAZORPAY_WEBHOOK_SECRET: z.string().min(1, 'RAZORPAY_WEBHOOK_SECRET is required'),
+  DASHBOARD_TOKEN: z.string().min(1, 'DASHBOARD_TOKEN is required'),
+  ADMIN_TOKEN: z.string().min(1, 'ADMIN_TOKEN is required'),
+  DB_PATH: z.string().min(1).default('./hundi.db'),
+  PORT: z.coerce.number().int().positive().default(8790),
+})
+
+export type Env = z.infer<typeof envSchema>
+
+/**
+ * Validates `source` (defaults to `process.env`) against the required shape.
+ * Throws a single Error listing every missing/invalid key — callers should
+ * let this crash the process at boot rather than catch and continue with a
+ * partially-configured facilitator.
+ */
+export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
+  const result = envSchema.safeParse(source)
+  if (!result.success) {
+    const issues = result.error.issues.map(
+      (issue) => `  - ${issue.path.join('.')}: ${issue.message}`,
+    )
+    throw new Error(`Invalid facilitator environment configuration:\n${issues.join('\n')}`)
+  }
+  return result.data
+}

@@ -123,6 +123,15 @@ CREATE TABLE IF NOT EXISTS merchants (
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
+-- Single-use dashboard-issued tokens that bind a mandate-registration ceremony to one
+-- /mandates call. `used_at IS NULL` is the "still valid" predicate; consumption is a
+-- conditional UPDATE, not a DELETE, so a spent token stays around as an audit trail.
+CREATE TABLE IF NOT EXISTS ceremony_tokens (
+  token TEXT PRIMARY KEY,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  used_at INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS ledger_events (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   event_type TEXT NOT NULL CHECK(event_type IN (

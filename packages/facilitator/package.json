@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "verify-ledger": "tsx bin/verify-ledger.ts",
-    "serve": "tsx src/serve.ts",
+    "serve": "tsx --env-file=../../.env src/serve.ts",
     "smoke:settle": "tsx --env-file=../../.env bin/smoke-settle.ts"
   },
   "dependencies": {

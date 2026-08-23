@@ -9,6 +9,7 @@ import { registerAdminRoutes } from './routes/admin.js'
 import { registerApprovalRoutes } from './routes/approvals.js'
 import { registerCeremonyTokenRoutes } from './routes/ceremony-tokens.js'
 import { registerMandateRoutes } from './routes/mandates.js'
+import { registerReadRoutes } from './routes/read.js'
 import { registerRevokeRoute } from './routes/revoke.js'
 import { registerSettlementRoutes } from './routes/settlements.js'
 import { registerVerifyRoute } from './routes/verify.js'
@@ -50,6 +51,7 @@ export function createApp(deps: AppDeps): Hono {
   registerRevokeRoute(app, deps)
   registerAdminRoutes(app, deps)
   registerWebhookRoutes(app, deps)
+  registerReadRoutes(app, deps)
 
   return app
 }

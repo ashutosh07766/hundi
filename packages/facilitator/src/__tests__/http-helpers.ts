@@ -23,6 +23,7 @@ export const TEST_ENV: Env = {
   ADMIN_TOKEN: 'admin-test-token',
   DB_PATH: ':memory:',
   PORT: 8790,
+  CHECKOUT_PAGE_PORT: 8788,
 }
 
 /** Fresh in-memory-db app + fake executor per call, matching openTestDb's "tests never

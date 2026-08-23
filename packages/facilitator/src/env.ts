@@ -16,6 +16,10 @@ const envSchema = z.object({
   ADMIN_TOKEN: z.string().min(1, 'ADMIN_TOKEN is required'),
   DB_PATH: z.string().min(1).default('./hundi.db'),
   PORT: z.coerce.number().int().positive().default(8790),
+  // Local host page the checkout driver points Playwright at (see rails/checkout-page.ts).
+  // Distinct from PORT — it's a same-process HTTP server serving a static Standard
+  // Checkout launcher page, not the facilitator API.
+  CHECKOUT_PAGE_PORT: z.coerce.number().int().positive().default(8788),
 })
 
 export type Env = z.infer<typeof envSchema>

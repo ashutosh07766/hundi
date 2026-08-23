@@ -15,6 +15,7 @@ import { zValidator } from '@hono/zod-validator'
 import { scanStore as defaultScanStore } from '@hundi/cli/scanner'
 import type { Hono } from 'hono'
 import type { AppDeps } from '../app.js'
+import { browserScanShopify as defaultBrowserScan } from '../browser-scan.js'
 import { tx } from '../db/index.js'
 import { buildPoisonProduct, toFeedProducts } from '../feed-product.js'
 import { requireHeaderToken } from '../middleware.js'
@@ -37,6 +38,7 @@ function deriveStoreName(finalUrl: string, fallback: string): string {
 export function registerStoreRoutes(app: Hono, deps: AppDeps): void {
   const { db, env } = deps
   const scan = deps.scanStore ?? defaultScanStore
+  const browserScan = deps.browserScan ?? defaultBrowserScan
 
   app.post(
     '/stores/onboard',
@@ -59,7 +61,24 @@ export function registerStoreRoutes(app: Hono, deps: AppDeps): void {
         )
       }
 
-      const products = toFeedProducts(scanResult)
+      let products = toFeedProducts(scanResult)
+      const warnings: string[] = []
+
+      // The fast server-side scan comes up empty on stores whose bot-protection blocks
+      // Node's `fetch` (a Cloudflare challenge, for example) while still serving a real
+      // browser normally. Only paid for when the cheap path already failed.
+      if (products.length === 0) {
+        const browserResult = await browserScan(url, scanResult.merchant_id)
+        if (browserResult.products.length > 0) {
+          products = toFeedProducts({
+            merchant_id: scanResult.merchant_id,
+            products: browserResult.products,
+            warnings: browserResult.warnings,
+          })
+          warnings.push(...browserResult.warnings)
+        }
+      }
+
       if (products.length === 0) {
         return c.json(
           {
@@ -88,6 +107,7 @@ export function registerStoreRoutes(app: Hono, deps: AppDeps): void {
           name,
           product_count: products.length,
           sample: products.slice(0, 5).map((p) => p.title),
+          ...(warnings.length > 0 ? { warnings } : {}),
         },
         200,
       )

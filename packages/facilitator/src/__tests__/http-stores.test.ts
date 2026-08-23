@@ -1,8 +1,23 @@
-import type { ScanResult } from '@hundi/cli/scanner'
+import type { ScannedProduct, ScanResult } from '@hundi/cli/scanner'
 import { describe, expect, it } from 'vitest'
 import { fakeScanResult, getJson, makeTestApp, postJson, TEST_ENV } from './http-helpers.js'
 
 const DASHBOARD_HEADERS = { 'x-hundi-dashboard-token': TEST_ENV.DASHBOARD_TOKEN }
+
+function fakeScannedProduct(overrides: Partial<ScannedProduct> = {}): ScannedProduct {
+  return {
+    sku: 'sku-browser-1',
+    name: 'Browser-scanned Product',
+    description: 'desc',
+    price_paise: 250000,
+    currency: 'INR',
+    availability: 'in_stock',
+    image: 'https://bot-gated.example/img/1.jpg',
+    brand: 'Acme',
+    url: 'https://bot-gated.example/products/1',
+    ...overrides,
+  }
+}
 
 describe('POST /stores/onboard', () => {
   it('rejects requests without the dashboard token', async () => {
@@ -77,13 +92,16 @@ describe('POST /stores/onboard', () => {
     ])
   })
 
-  it('reports NO_PRODUCTS and registers nothing when the scan yields zero usable products', async () => {
+  it('reports NO_PRODUCTS and registers nothing when both the scan and the browser fallback yield zero usable products', async () => {
     const scan: ScanResult = {
       merchant_id: 'empty-com',
       warnings: ['no JSON-LD found'],
       products: [],
     }
-    const { app } = makeTestApp({ scanStore: async () => scan })
+    const { app } = makeTestApp({
+      scanStore: async () => scan,
+      browserScan: async () => ({ products: [], warnings: [] }),
+    })
 
     const res = await postJson(
       app,
@@ -98,6 +116,88 @@ describe('POST /stores/onboard', () => {
     const storesRes = await getJson(app, '/stores')
     const storesJson = (await storesRes.json()) as { stores: unknown[] }
     expect(storesJson.stores).toEqual([])
+  })
+
+  it('falls back to the headless-browser scan when the server-side scan yields zero usable products, and registers the browser-scanned catalog', async () => {
+    const scan: ScanResult = {
+      merchant_id: 'bot-gated-com',
+      warnings: ['no JSON-LD found'],
+      products: [],
+    }
+    const browserScanCalls: Array<{ url: string; merchantId: string }> = []
+    const { app } = makeTestApp({
+      scanStore: async () => scan,
+      browserScan: async (url, merchantId) => {
+        browserScanCalls.push({ url, merchantId })
+        return {
+          products: [
+            fakeScannedProduct({ sku: 'sku-a', name: 'Product A' }),
+            fakeScannedProduct({ sku: 'sku-b', name: 'Product B' }),
+            fakeScannedProduct({ sku: 'sku-c', name: 'Product C' }),
+          ],
+          warnings: [
+            'scanned via headless browser (server-side fetch was bot-blocked): 3 products',
+          ],
+        }
+      },
+    })
+
+    const res = await postJson(
+      app,
+      '/stores/onboard',
+      { url: 'https://bot-gated.example' },
+      DASHBOARD_HEADERS,
+    )
+    expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(json).toMatchObject({
+      ok: true,
+      merchant_id: 'bot-gated-com',
+      product_count: 3,
+      sample: ['Product A', 'Product B', 'Product C'],
+      warnings: ['scanned via headless browser (server-side fetch was bot-blocked): 3 products'],
+    })
+    expect(browserScanCalls).toEqual([
+      { url: 'https://bot-gated.example', merchantId: 'bot-gated-com' },
+    ])
+
+    const catalogRes = await getJson(app, '/catalog/bot-gated-com')
+    expect(catalogRes.status).toBe(200)
+    const products = (await catalogRes.json()) as Array<{ id: string }>
+    expect(products.map((p) => p.id)).toEqual(['sku-a', 'sku-b', 'sku-c'])
+
+    const storesRes = await getJson(app, '/stores')
+    const storesJson = (await storesRes.json()) as { stores: unknown[] }
+    expect(storesJson.stores).toEqual([
+      {
+        merchant_id: 'bot-gated-com',
+        name: 'bot-gated.example',
+        product_count: 3,
+        source_url: 'https://bot-gated.example',
+      },
+    ])
+  })
+
+  it('does not call the browser fallback when the server-side scan already has usable products', async () => {
+    const scan = fakeScanResult({ merchant_id: 'fast-path-com' })
+    let browserScanCallCount = 0
+    const { app } = makeTestApp({
+      scanStore: async () => scan,
+      browserScan: async () => {
+        browserScanCallCount += 1
+        return { products: [], warnings: [] }
+      },
+    })
+
+    const res = await postJson(
+      app,
+      '/stores/onboard',
+      { url: 'https://fast-path.example' },
+      DASHBOARD_HEADERS,
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ ok: true, product_count: 1 })
+    expect(browserScanCallCount).toBe(0)
   })
 
   it('filters out structurally invalid products before counting them as usable', async () => {

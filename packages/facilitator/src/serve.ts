@@ -1,5 +1,6 @@
 import { serve } from '@hono/node-server'
 import { createApp } from './app.js'
+import { closeBrowserScanner } from './browser-scan.js'
 import { openDb } from './db/index.js'
 import { loadEnv } from './env.js'
 import { createExecutor } from './executor.js'
@@ -53,3 +54,13 @@ void seedDemoStoreCatalog(db, DEMO_STORE_URL)
 serve({ fetch: app.fetch, hostname: '127.0.0.1', port: env.PORT }, (info) => {
   console.log(`facilitator listening on http://127.0.0.1:${info.port}`)
 })
+
+// The browser-scan fallback only launches Chromium lazily, on the first bot-gated
+// onboard — but once launched it stays alive for the process lifetime (see
+// browser-scan.ts), so it needs an explicit close on exit or it lingers as an orphaned
+// process.
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    void closeBrowserScanner().finally(() => process.exit(0))
+  })
+}

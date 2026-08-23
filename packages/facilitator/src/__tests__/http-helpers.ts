@@ -43,7 +43,11 @@ export const TEST_ENV: Env = {
  * out-of-band). `razorpay` defaults to the same in-memory fake executor-helpers.ts
  * tests use — pass one in to control fetchOrderPayments for webhook tests. */
 export function makeTestApp(
-  opts: { razorpay?: RazorpayClient; scanStore?: AppDeps['scanStore'] } = {},
+  opts: {
+    razorpay?: RazorpayClient
+    scanStore?: AppDeps['scanStore']
+    browserScan?: AppDeps['browserScan']
+  } = {},
 ): {
   app: Hono
   db: ReturnType<typeof openTestDb>
@@ -59,6 +63,7 @@ export function makeTestApp(
     env: TEST_ENV,
     razorpay,
     ...(opts.scanStore ? { scanStore: opts.scanStore } : {}),
+    ...(opts.browserScan ? { browserScan: opts.browserScan } : {}),
   })
   return { app, db, executor, razorpay }
 }

@@ -2,6 +2,7 @@ import type { ScanResult } from '@hundi/cli/scanner'
 import type Database from 'better-sqlite3'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import type { BrowserScanResult } from './browser-scan.js'
 import type { Env } from './env.js'
 import { errorBody, RouteError } from './errors.js'
 import type { Executor } from './executor.js'
@@ -31,6 +32,10 @@ export type AppDeps = {
    * routes/stores.ts) — overridable here so tests can onboard a store without making a
    * real network request. */
   scanStore?: (url: string) => Promise<ScanResult>
+  /** Fallback used when `scanStore` yields zero usable products — defaults to the real
+   * headless-browser scan (`browser-scan.ts`) at the route layer, overridable here so
+   * tests can exercise the fallback path without launching a browser. */
+  browserScan?: (url: string, merchantId: string) => Promise<BrowserScanResult>
 }
 
 /** Builds the Hono app with `deps` injected — tests pass an in-memory db and a

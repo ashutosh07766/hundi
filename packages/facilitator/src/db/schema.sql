@@ -132,6 +132,20 @@ CREATE TABLE IF NOT EXISTS ceremony_tokens (
   used_at INTEGER
 );
 
+-- The agent-feed-shape catalog for a store onboarded via POST /stores/onboard (or seeded
+-- for the built-in demo store). Upsert-on-reonboard, unlike merchants: a store's real
+-- catalog legitimately changes between scans, so the latest scan always wins. catalog_json
+-- is the feed-shape products array (see routes/stores.ts's toFeedProducts) — GET
+-- /catalog/:merchant_id serves it back verbatim (plus a poisoned listing when asked).
+CREATE TABLE IF NOT EXISTS store_catalogs (
+  merchant_id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  source_url TEXT,
+  product_count INTEGER NOT NULL,
+  catalog_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
 CREATE TABLE IF NOT EXISTS ledger_events (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   event_type TEXT NOT NULL CHECK(event_type IN (

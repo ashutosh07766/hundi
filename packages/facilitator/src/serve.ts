@@ -5,7 +5,12 @@ import { loadEnv } from './env.js'
 import { createExecutor } from './executor.js'
 import { createCheckoutDriver } from './rails/checkout-driver.js'
 import { createRazorpayClient } from './razorpay-client.js'
+import { seedDemoStoreCatalog } from './seed-demo-store.js'
 import { createSweep } from './sweep.js'
+
+// Matches apps/dashboard's DEFAULT_STORE_URL (lib/config.ts) — the demo store has no
+// env-configurable port of its own today, so both sides hardcode the same default.
+const DEMO_STORE_URL = 'http://127.0.0.1:8791'
 
 // Boots only against the loopback interface: this process holds Razorpay secrets and
 // mints ceremony tokens, so it must never be reachable except through a trusted
@@ -40,6 +45,10 @@ const sweep = createSweep({
   intervalMs: env.SWEEP_INTERVAL_MS,
 })
 sweep.start()
+
+// Fire-and-forget — see seed-demo-store.ts. Deliberately not awaited so a slow or absent
+// demo store never delays the facilitator itself from binding its port below.
+void seedDemoStoreCatalog(db, DEMO_STORE_URL)
 
 serve({ fetch: app.fetch, hostname: '127.0.0.1', port: env.PORT }, (info) => {
   console.log(`facilitator listening on http://127.0.0.1:${info.port}`)

@@ -90,6 +90,10 @@ export const revokeBodySchema = z.object({
   sig: sigEnvelopeSchema,
 })
 
+export const storesOnboardBodySchema = z.object({
+  url: z.string().min(1).url(),
+})
+
 export const adminMerchantBodySchema = z.object({
   merchant_id: z.string().min(1),
   name: z.string().min(1),

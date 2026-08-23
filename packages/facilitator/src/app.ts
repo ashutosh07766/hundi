@@ -1,3 +1,4 @@
+import type { ScanResult } from '@hundi/cli/scanner'
 import type Database from 'better-sqlite3'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
@@ -12,6 +13,7 @@ import { registerMandateRoutes } from './routes/mandates.js'
 import { registerReadRoutes } from './routes/read.js'
 import { registerRevokeRoute } from './routes/revoke.js'
 import { registerSettlementRoutes } from './routes/settlements.js'
+import { registerStoreRoutes } from './routes/stores.js'
 import { registerVerifyRoute } from './routes/verify.js'
 import { registerWebhookRoutes } from './routes/webhook.js'
 
@@ -25,6 +27,10 @@ export type AppDeps = {
   executor: Executor
   env: Env
   razorpay: RazorpayClient
+  /** Defaults to the real `@hundi/cli/scanner` scanStore at the route layer (see
+   * routes/stores.ts) — overridable here so tests can onboard a store without making a
+   * real network request. */
+  scanStore?: (url: string) => Promise<ScanResult>
 }
 
 /** Builds the Hono app with `deps` injected — tests pass an in-memory db and a
@@ -52,6 +58,7 @@ export function createApp(deps: AppDeps): Hono {
   registerAdminRoutes(app, deps)
   registerWebhookRoutes(app, deps)
   registerReadRoutes(app, deps)
+  registerStoreRoutes(app, deps)
 
   return app
 }

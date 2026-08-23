@@ -1,5 +1,7 @@
+import type { ScanResult } from '@hundi/cli/scanner'
 import type { Credential, IntentMandate } from '@hundi/core'
 import type { Hono } from 'hono'
+import type { AppDeps } from '../app.js'
 import { createApp } from '../app.js'
 import type { Env } from '../env.js'
 import type { Executor } from '../executor.js'
@@ -40,7 +42,9 @@ export const TEST_ENV: Env = {
  * need to assert on directly (executor.calls, razorpay spies, or driving the db
  * out-of-band). `razorpay` defaults to the same in-memory fake executor-helpers.ts
  * tests use — pass one in to control fetchOrderPayments for webhook tests. */
-export function makeTestApp(opts: { razorpay?: RazorpayClient } = {}): {
+export function makeTestApp(
+  opts: { razorpay?: RazorpayClient; scanStore?: AppDeps['scanStore'] } = {},
+): {
   app: Hono
   db: ReturnType<typeof openTestDb>
   executor: Executor & { calls: string[]; resumeCalls: string[] }
@@ -49,8 +53,37 @@ export function makeTestApp(opts: { razorpay?: RazorpayClient } = {}): {
   const db = openTestDb()
   const executor = makeFakeExecutor()
   const razorpay = opts.razorpay ?? makeFakeRazorpay()
-  const app = createApp({ db, executor, env: TEST_ENV, razorpay })
+  const app = createApp({
+    db,
+    executor,
+    env: TEST_ENV,
+    razorpay,
+    ...(opts.scanStore ? { scanStore: opts.scanStore } : {}),
+  })
   return { app, db, executor, razorpay }
+}
+
+/** A minimal valid ScanResult for tests that inject a fake scanStore — override fields
+ * per-test with `{ ...fakeScanResult(), products: [...] }`. */
+export function fakeScanResult(overrides: Partial<ScanResult> = {}): ScanResult {
+  return {
+    merchant_id: 'example-com',
+    warnings: [],
+    products: [
+      {
+        sku: 'sku-1',
+        name: 'Test Product',
+        description: 'A product scanned from a fixture.',
+        price_paise: 199900,
+        currency: 'INR',
+        availability: 'in_stock',
+        image: 'https://example.com/img/sku-1.jpg',
+        brand: 'Example Brand',
+        url: 'https://example.com/products/sku-1',
+      },
+    ],
+    ...overrides,
+  }
 }
 
 export async function postJson(

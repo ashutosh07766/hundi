@@ -15,6 +15,7 @@
   "dependencies": {
     "@hono/node-server": "^2.1.1",
     "@hono/zod-validator": "^0.9.0",
+    "@hundi/cli": "workspace:*",
     "@hundi/core": "workspace:*",
     "better-sqlite3": "^13.0.3",
     "hono": "^4.13.3",

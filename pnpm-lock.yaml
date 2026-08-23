@@ -203,6 +203,9 @@ importers:
       '@hono/zod-validator':
         specifier: ^0.9.0
         version: 0.9.0(hono@4.13.3)(zod@4.4.3)
+      '@hundi/cli':
+        specifier: workspace:*
+        version: link:../cli
       '@hundi/core':
         specifier: workspace:*
         version: link:../core

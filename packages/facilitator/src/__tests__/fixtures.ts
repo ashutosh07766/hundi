@@ -50,15 +50,23 @@ function nextMandateId(): string {
 }
 
 export type MakeIntentOptions = {
+  /** The key embedded as `agent_pubkey_hex` and used to sign carts. */
   agent?: Ed25519Keypair
+  /** The key that signs the intent and is registered as the mandate's credential.
+   * Defaults to `agent` (the degenerate single-key case). Pass a distinct key to
+   * exercise the real two-party model — human signs the intent + approvals, agent
+   * signs the cart. */
+  human?: Ed25519Keypair
   overrides?: Partial<Omit<IntentMandate, 'sig'>>
 }
 
 export function makeIntent(opts: MakeIntentOptions = {}): {
   intent: IntentMandate
   agent: Ed25519Keypair
+  human: Ed25519Keypair
 } {
   const agent = opts.agent ?? makeEd25519Keypair()
+  const human = opts.human ?? agent
   const unsigned: Omit<IntentMandate, 'sig'> = {
     mandateId: nextMandateId(),
     goal: 'buy running shoes',
@@ -70,8 +78,8 @@ export function makeIntent(opts: MakeIntentOptions = {}): {
     agent_pubkey_hex: agent.publicKeyHex,
     ...opts.overrides,
   }
-  const sig = signEnvelope(agent.privateKey, intentSigningBytes(unsigned))
-  return { intent: { ...unsigned, sig }, agent }
+  const sig = signEnvelope(human.privateKey, intentSigningBytes(unsigned))
+  return { intent: { ...unsigned, sig }, agent, human }
 }
 
 export type MakeCartOptions = {

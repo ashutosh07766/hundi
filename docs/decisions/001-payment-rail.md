@@ -18,3 +18,13 @@
 - Our idempotency-key store is the ONLY order-create dedup guard (provider gives none). Strengthens the product thesis; raises the bar on our own implementation (KTD5).
 - `packages/checkout-driver` is real scope (not dead code): budget it.
 - Reconciliation queries Razorpay by receipt for lookup, never relies on receipt for dedup.
+
+## Update (2026-08-23, later) — rail (b) driven flow settled
+
+Live spike drove all three sub-rails; only ONE works hands-free under automation:
+- **Cards**: DEAD under automation. Stripe test card BIN-flagged international; Razorpay's real domestic test card submits but the OTP step hangs forever — Sardine.ai fingerprinting (`enablePortScanning`), Radar/hCaptcha/HumanSecurity, PerimeterX EvalError. A client-side risk gate that never resolves for a bot.
+- **UPI**: not offered on this test account at all.
+- **Netbanking**: WORKS. Selecting a bank opens Razorpay's own `mocksharp` mock-bank popup with plain Success/Failure buttons — no OTP, no fraud scoring. This is the driven flow.
+
+**Failure injection** = click the mock-bank **Failure** button (deterministic; replaces `failure@razorpay`).
+**Numbers:** capture ×2 (pay_TTAqj6..., pay_TTArGp...), 5/5 repeat (20.9–24.8s each), signatures verified. Per-settle budget ~25s → harness batch-of-20 ≈ 8 min (within gate). Executor (U7) drives netbanking; UPI functions kept exported for a future swap if UPI gets enabled for the demo narrative.

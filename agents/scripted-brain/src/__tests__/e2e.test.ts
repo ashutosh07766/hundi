@@ -26,6 +26,7 @@ import { POISON_PRODUCT } from '../../../../apps/store/src/poison-fixture.js'
 import { createApp as createFacilitatorApp } from '../../../../packages/facilitator/src/app.js'
 import { openDb, tx } from '../../../../packages/facilitator/src/db/index.js'
 import { appendLedger } from '../../../../packages/facilitator/src/ledger.js'
+import type { RazorpayClient } from '../../../../packages/facilitator/src/razorpay-client.js'
 import { transitionSettlement } from '../../../../packages/facilitator/src/state-machine.js'
 
 import type { BuyerTools } from '../agent-tools.js'
@@ -43,6 +44,26 @@ const TEST_ENV = {
   DB_PATH: ':memory:',
   PORT: 0,
   CHECKOUT_PAGE_PORT: 0,
+  SWEEP_INTERVAL_MS: 12_000,
+  APPROVAL_TTL_MS: 1_800_000,
+}
+
+/** This suite never hits Razorpay's API (the fake executor above short-circuits
+ * straight to captured) — the webhook route and the reconciliation sweep both need a
+ * RazorpayClient in AppDeps, so this stub exists purely to satisfy that shape. */
+const noopRazorpayClient: RazorpayClient = {
+  createOrder() {
+    throw new Error('not used by the scripted-brain e2e suite')
+  },
+  createPaymentLink() {
+    throw new Error('not used by the scripted-brain e2e suite')
+  },
+  refundPayment() {
+    throw new Error('not used by the scripted-brain e2e suite')
+  },
+  fetchOrderPayments() {
+    throw new Error('not used by the scripted-brain e2e suite')
+  },
 }
 
 const noopLog = () => {}
@@ -70,6 +91,9 @@ function makeCapturingExecutor(db: FacilitatorDb) {
         })
       })
     },
+    // Not exercised by this suite — the fake above never leaves a settlement in
+    // `settling` with no attempt, so the sweep-only resume path never fires here.
+    resumeSettling(_settlementId: string): void {},
   }
 }
 
@@ -109,7 +133,7 @@ afterAll(async () => {
 async function bootFacilitator(): Promise<{ url: string; db: FacilitatorDb }> {
   const db = openDb(':memory:')
   const executor = makeCapturingExecutor(db)
-  const app = createFacilitatorApp({ db, executor, env: TEST_ENV })
+  const app = createFacilitatorApp({ db, executor, env: TEST_ENV, razorpay: noopRazorpayClient })
   const facilitator = await listen(app)
   closeFacilitator = facilitator.close
   return { url: facilitator.url, db }

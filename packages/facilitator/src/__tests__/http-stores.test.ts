@@ -28,6 +28,46 @@ describe('POST /stores/onboard', () => {
     expect(json).toMatchObject({ ok: false, error: 'UNAUTHORIZED' })
   })
 
+  it('accepts the narrow onboard token when configured (not just the dashboard token)', async () => {
+    const { app } = makeTestApp({
+      env: { ONBOARD_TOKEN: 'onboard-test-token' },
+      scanStore: async () => fakeScanResult({ merchant_id: 'example-com' }),
+    })
+    const res = await postJson(
+      app,
+      '/stores/onboard',
+      { url: 'https://example.com' },
+      { 'x-hundi-onboard-token': 'onboard-test-token' },
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ ok: true, merchant_id: 'example-com' })
+  })
+
+  it('rejects a wrong onboard token', async () => {
+    const { app } = makeTestApp({
+      env: { ONBOARD_TOKEN: 'onboard-test-token' },
+      scanStore: async () => fakeScanResult(),
+    })
+    const res = await postJson(
+      app,
+      '/stores/onboard',
+      { url: 'https://example.com' },
+      { 'x-hundi-onboard-token': 'wrong' },
+    )
+    expect(res.status).toBe(401)
+  })
+
+  it('rejects an onboard-token header when no onboard token is configured', async () => {
+    const { app } = makeTestApp({ scanStore: async () => fakeScanResult() })
+    const res = await postJson(
+      app,
+      '/stores/onboard',
+      { url: 'https://example.com' },
+      { 'x-hundi-onboard-token': 'anything' },
+    )
+    expect(res.status).toBe(401)
+  })
+
   it('scans, registers the merchant + catalog, and returns a sample', async () => {
     const scan = fakeScanResult({
       merchant_id: 'example-com',

@@ -10,7 +10,12 @@ function facilitatorUrl(): string {
 
 async function main(): Promise<void> {
   const agent = loadOrCreateAgentIdentity()
-  const server = createHundiMcpServer({ agent, facilitatorUrl: facilitatorUrl() })
+  const onboardToken = process.env.HUNDI_ONBOARD_TOKEN?.trim()
+  const server = createHundiMcpServer({
+    agent,
+    facilitatorUrl: facilitatorUrl(),
+    ...(onboardToken ? { onboardToken } : {}),
+  })
   await server.connect(new StdioServerTransport())
 }
 

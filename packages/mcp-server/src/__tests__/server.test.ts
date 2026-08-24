@@ -945,3 +945,61 @@ describe('list_orders', () => {
     expect(body.orders[0]?.settlement_id).toBe('s-cap')
   })
 })
+
+describe('onboard_store', () => {
+  const makeOnboardServer = (
+    state: ReturnType<typeof makeFakeFacilitatorState>,
+    onboardToken?: string,
+  ) => {
+    globalThis.fetch = fakeFacilitatorFetch(state)
+    return createHundiMcpServer({
+      agent: generateAgentKeypair(),
+      facilitatorUrl: FACILITATOR_URL,
+      facilitatorClient: createFacilitatorClient(FACILITATOR_URL, onboardToken),
+      buyerTools: new HttpBuyerTools({
+        storeUrl: FACILITATOR_URL,
+        facilitatorUrl: FACILITATOR_URL,
+      }),
+    })
+  }
+
+  it('scans with the onboard token (never the dashboard token) and returns the merchant_id', async () => {
+    const state = makeFakeFacilitatorState({})
+    const client = await connectedClient(makeOnboardServer(state, 'onboard-tok'))
+
+    const body = jsonOf<{ ok: boolean; merchant_id: string; sample: string[] }>(
+      await client.callTool({ name: 'onboard_store', arguments: { url: 'https://example.com' } }),
+    )
+    expect(body.ok).toBe(true)
+    expect(body.merchant_id).toBe('example-com')
+    expect(state.onboardCalls[0]).toMatchObject({
+      url: 'https://example.com',
+      onboardToken: 'onboard-tok',
+    })
+  })
+
+  it('fails loud UNSUPPORTED_STORE when the store exposes no readable catalog', async () => {
+    const state = makeFakeFacilitatorState({
+      onboardResponse: { status: 400, body: { ok: false, error: 'NO_PRODUCTS', detail: 'none' } },
+    })
+    const client = await connectedClient(makeOnboardServer(state, 'onboard-tok'))
+
+    const body = jsonOf<{ ok: boolean; reason: string }>(
+      await client.callTool({ name: 'onboard_store', arguments: { url: 'https://puma.example' } }),
+    )
+    expect(body.ok).toBe(false)
+    expect(body.reason).toBe('UNSUPPORTED_STORE')
+  })
+
+  it('reports onboarding as unconfigured (no facilitator call) when the server holds no onboard token', async () => {
+    const state = makeFakeFacilitatorState({})
+    const client = await connectedClient(makeOnboardServer(state))
+
+    const body = jsonOf<{ ok: boolean; reason: string; message: string }>(
+      await client.callTool({ name: 'onboard_store', arguments: { url: 'https://example.com' } }),
+    )
+    expect(body.ok).toBe(false)
+    expect(body.reason).toBe('ONBOARD_FAILED')
+    expect(state.onboardCalls).toHaveLength(0)
+  })
+})

@@ -21,6 +21,7 @@ import { registerGetOrderTool } from './tools/get-order.js'
 import { registerGetStoreInfoTool } from './tools/get-store-info.js'
 import { registerListOrdersTool } from './tools/list-orders.js'
 import { registerListStoresTool } from './tools/list-stores.js'
+import { registerOnboardStoreTool } from './tools/onboard-store.js'
 import { registerPrepareMandateTool } from './tools/prepare-mandate.js'
 import { registerRequestPurchaseTool } from './tools/request-purchase.js'
 import { registerSearchProductsTool } from './tools/search-products.js'
@@ -47,6 +48,11 @@ const SERVER_INSTRUCTIONS =
 export type HundiServerDeps = {
   agent: AgentKeypair
   facilitatorUrl: string
+  /** The narrow onboard token, forwarded to the default facilitator client so
+   * onboard_store can authorize a catalog scan. Absent → onboard_store reports
+   * onboarding as unconfigured; every other tool is unaffected. Ignored when a
+   * `facilitatorClient` is injected (tests pass their own). */
+  onboardToken?: string
   /** Injectable for tests; defaults to a real HTTP client against `facilitatorUrl`. */
   facilitatorClient?: FacilitatorClient
   /** Injectable for tests; defaults to a real `HttpBuyerTools` against `facilitatorUrl` — the
@@ -55,7 +61,8 @@ export type HundiServerDeps = {
 }
 
 export function createHundiMcpServer(deps: HundiServerDeps): McpServer {
-  const facilitatorClient = deps.facilitatorClient ?? createFacilitatorClient(deps.facilitatorUrl)
+  const facilitatorClient =
+    deps.facilitatorClient ?? createFacilitatorClient(deps.facilitatorUrl, deps.onboardToken)
   const buyerTools =
     deps.buyerTools ??
     new HttpBuyerTools({
@@ -83,6 +90,7 @@ export function createHundiMcpServer(deps: HundiServerDeps): McpServer {
   registerRequestPurchaseTool(server, { agent: deps.agent, facilitatorClient, buyerTools })
   registerGetOrderTool(server, { facilitatorClient })
   registerListOrdersTool(server, { agent: deps.agent, facilitatorClient })
+  registerOnboardStoreTool(server, { facilitatorClient })
 
   return server
 }

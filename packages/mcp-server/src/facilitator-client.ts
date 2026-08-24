@@ -84,8 +84,21 @@ export type SettlementSummary = {
   rejectReason: string | null
 }
 
+export type OnboardStoreResult = {
+  merchantId: string
+  name: string
+  productCount: number
+  sample: string[]
+  warnings: string[]
+}
+
 export type FacilitatorClient = {
   listStores(): Promise<StoreListItem[]>
+  /** POST /stores/onboard — scans a public storefront's catalog and stores it so
+   * the store becomes shoppable. Gated by the narrow onboard token (never the
+   * dashboard token), so this grants no spending authority: onboarding only makes
+   * a catalog available; a human-signed mandate still gates every purchase. */
+  onboardStore(url: string): Promise<OnboardStoreResult>
   getCatalog(merchantId: string): Promise<Product[]>
   listMandates(): Promise<MandateRecord[]>
   listSettlements(): Promise<SettlementSummary[]>
@@ -114,7 +127,10 @@ function envelopeError(path: string, res: Response, body: Envelope): Error {
 /** The one implementation this package ships. Every call goes to `facilitatorUrl` —
  * this class never learns of a store's own URL, matching stores.ts's design: the
  * facilitator is the single origin every catalog fetch is keyed through. */
-export function createFacilitatorClient(facilitatorUrl: string): FacilitatorClient {
+export function createFacilitatorClient(
+  facilitatorUrl: string,
+  onboardToken?: string,
+): FacilitatorClient {
   const base = facilitatorUrl.replace(/\/$/, '')
 
   async function getEnvelope<T extends Envelope>(path: string): Promise<T> {
@@ -128,6 +144,36 @@ export function createFacilitatorClient(facilitatorUrl: string): FacilitatorClie
     async listStores() {
       const { stores } = await getEnvelope<{ ok: true; stores: StoreListItem[] }>('/stores')
       return stores
+    },
+
+    async onboardStore(url) {
+      if (!onboardToken) {
+        throw new Error(
+          'Store onboarding is not configured on this server (no onboard token). Ask the operator ' +
+            'to onboard the store from the Hundi dashboard instead.',
+        )
+      }
+      const path = '/stores/onboard'
+      const res = await fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-hundi-onboard-token': onboardToken },
+        body: JSON.stringify({ url }),
+      })
+      const body = (await parseJson(res, path)) as Envelope & {
+        merchant_id?: string
+        name?: string
+        product_count?: number
+        sample?: string[]
+        warnings?: string[]
+      }
+      if (!res.ok || body.ok === false || !body.merchant_id) throw envelopeError(path, res, body)
+      return {
+        merchantId: body.merchant_id,
+        name: body.name ?? body.merchant_id,
+        productCount: body.product_count ?? 0,
+        sample: body.sample ?? [],
+        warnings: body.warnings ?? [],
+      }
     },
 
     // GET /catalog/:merchant_id is the one facilitator read route that doesn't

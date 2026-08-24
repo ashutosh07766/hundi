@@ -14,6 +14,12 @@ const envSchema = z.object({
   RAZORPAY_WEBHOOK_SECRET: z.string().min(1, 'RAZORPAY_WEBHOOK_SECRET is required'),
   DASHBOARD_TOKEN: z.string().min(1, 'DASHBOARD_TOKEN is required'),
   ADMIN_TOKEN: z.string().min(1, 'ADMIN_TOKEN is required'),
+  // Least-privilege token that gates ONLY store onboarding (POST /stores/onboard),
+  // so an agent-facing surface (the MCP onboard_store tool) can scan a public
+  // catalog without holding the dashboard token — which also mints ceremony
+  // tokens and would let the agent self-register a mandate. Optional: when unset,
+  // only the dashboard token authorizes onboarding, exactly as before.
+  ONBOARD_TOKEN: z.string().min(1).optional(),
   DB_PATH: z.string().min(1).default('./hundi.db'),
   PORT: z.coerce.number().int().positive().default(8790),
   // Local host page the checkout driver points Playwright at (see rails/checkout-page.ts).

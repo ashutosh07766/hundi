@@ -77,12 +77,19 @@ export type FakeFacilitatorState = {
   onProposeMandate?: (call: ProposeMandateCall) => { status: number; body: unknown }
   /** Every intercepted POST /mandates/propose call, in order — assert against this. */
   proposeMandateCalls: ProposeMandateCall[]
+  /** Response for POST /stores/onboard; defaults to a 201 success. */
+  onboardResponse?: { status: number; body: unknown }
+  /** Every intercepted POST /stores/onboard call (url + onboard token header). */
+  onboardCalls: { url: string; onboardToken: string | null }[]
 }
 
 export function makeFakeFacilitatorState(
-  overrides: Omit<FakeFacilitatorState, 'createSettlementCalls' | 'proposeMandateCalls'> = {},
+  overrides: Omit<
+    FakeFacilitatorState,
+    'createSettlementCalls' | 'proposeMandateCalls' | 'onboardCalls'
+  > = {},
 ): FakeFacilitatorState {
-  return { ...overrides, createSettlementCalls: [], proposeMandateCalls: [] }
+  return { ...overrides, createSettlementCalls: [], proposeMandateCalls: [], onboardCalls: [] }
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -129,6 +136,27 @@ export function fakeFacilitatorFetch(state: FakeFacilitatorState): typeof fetch 
       const outcome = state.onCreateSettlement?.(call) ?? {
         status: 202,
         body: { ok: true, settlement_id: 'settlement-1', state: 'approved' },
+      }
+      return jsonResponse(outcome.body, outcome.status)
+    }
+
+    if (method === 'POST' && pathname === '/stores/onboard') {
+      const parsed = JSON.parse(String(init?.body)) as { url: string }
+      const headers = init?.headers as Record<string, string> | undefined
+      state.onboardCalls.push({
+        url: parsed.url,
+        onboardToken: headers?.['x-hundi-onboard-token'] ?? null,
+      })
+      const outcome = state.onboardResponse ?? {
+        status: 201,
+        body: {
+          ok: true,
+          merchant_id: 'example-com',
+          name: 'example.com',
+          product_count: 42,
+          sample: ['Widget A', 'Widget B'],
+          warnings: [],
+        },
       }
       return jsonResponse(outcome.body, outcome.status)
     }

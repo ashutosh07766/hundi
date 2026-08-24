@@ -18,7 +18,7 @@ import type { AppDeps } from '../app.js'
 import { browserScanShopify as defaultBrowserScan } from '../browser-scan.js'
 import { tx } from '../db/index.js'
 import { buildPoisonProduct, toFeedProducts } from '../feed-product.js'
-import { requireHeaderToken } from '../middleware.js'
+import { requireDashboardOrOnboardToken } from '../middleware.js'
 import { storesOnboardBodySchema } from '../schemas.js'
 import {
   getStoreCatalog,
@@ -42,7 +42,7 @@ export function registerStoreRoutes(app: Hono, deps: AppDeps): void {
 
   app.post(
     '/stores/onboard',
-    requireHeaderToken('x-hundi-dashboard-token', env.DASHBOARD_TOKEN),
+    requireDashboardOrOnboardToken(env.DASHBOARD_TOKEN, env.ONBOARD_TOKEN),
     zValidator('json', storesOnboardBodySchema),
     async (c) => {
       const { url } = c.req.valid('json')

@@ -828,3 +828,120 @@ describe('request_purchase — variant resolution, max price, idempotency', () =
     expect(keyAfter).toBe(keyBefore)
   })
 })
+
+describe('list_orders', () => {
+  const cartJson = (sku: string, variantLabel?: string) =>
+    JSON.stringify({
+      cartId: `cart-${sku}`,
+      merchant_id: 'demo-store-1',
+      items: [
+        {
+          sku,
+          qty: 1,
+          unit_price_paise: 100_000,
+          ...(variantLabel ? { variant_label: variantLabel } : {}),
+        },
+      ],
+      total_paise: 100_000,
+      intent_hash_hex: 'h',
+      agent_sig_hex: 's',
+    })
+
+  it("lists only this agent's purchases, newest first, with variant labels", async () => {
+    const agent = generateAgentKeypair()
+    const other = generateAgentKeypair()
+    const { intent: mine } = makeSignedIntent({ agent, overrides: { mandateId: 'mandate-mine' } })
+    const { intent: theirs } = makeSignedIntent({
+      agent: other,
+      overrides: { mandateId: 'mandate-other' },
+    })
+    const state = makeFakeFacilitatorState({
+      mandates: [
+        mandateRow({ mandateId: 'mandate-mine', intent: mine }),
+        mandateRow({ mandateId: 'mandate-other', intent: theirs }),
+      ],
+      settlementsList: [
+        {
+          id: 's-old',
+          mandate_id: 'mandate-mine',
+          state: 'captured',
+          amount_paise: 100_000,
+          merchant_id: 'demo-store-1',
+          cart_json: cartJson('sneaker', 'Black / 11UK'),
+          created_at: 100,
+          reject_reason: null,
+        },
+        {
+          id: 's-new',
+          mandate_id: 'mandate-mine',
+          state: 'pending_approval',
+          amount_paise: 100_000,
+          merchant_id: 'demo-store-1',
+          cart_json: cartJson('socks'),
+          created_at: 200,
+          reject_reason: null,
+        },
+        {
+          id: 's-theirs',
+          mandate_id: 'mandate-other',
+          state: 'captured',
+          amount_paise: 100_000,
+          merchant_id: 'demo-store-1',
+          cart_json: cartJson('not-mine'),
+          created_at: 300,
+          reject_reason: null,
+        },
+      ],
+    })
+    const { server } = buildServer(state, agent)
+    const client = await connectedClient(server)
+
+    const body = jsonOf<{
+      count: number
+      orders: { settlement_id: string; state: string; items: { sku: string; variant?: string }[] }[]
+    }>(await client.callTool({ name: 'list_orders', arguments: {} }))
+
+    // Only the two under mandate-mine, newest first; the other agent's is excluded.
+    expect(body.count).toBe(2)
+    expect(body.orders.map((o) => o.settlement_id)).toEqual(['s-new', 's-old'])
+    expect(body.orders[1]?.items[0]).toMatchObject({ sku: 'sneaker', variant: 'Black / 11UK' })
+  })
+
+  it('filters by state when asked', async () => {
+    const agent = generateAgentKeypair()
+    const { intent } = makeSignedIntent({ agent, overrides: { mandateId: 'mandate-mine' } })
+    const state = makeFakeFacilitatorState({
+      mandates: [mandateRow({ mandateId: 'mandate-mine', intent })],
+      settlementsList: [
+        {
+          id: 's-cap',
+          mandate_id: 'mandate-mine',
+          state: 'captured',
+          amount_paise: 100_000,
+          merchant_id: 'demo-store-1',
+          cart_json: cartJson('a'),
+          created_at: 1,
+          reject_reason: null,
+        },
+        {
+          id: 's-rej',
+          mandate_id: 'mandate-mine',
+          state: 'rejected',
+          amount_paise: 100_000,
+          merchant_id: 'demo-store-1',
+          cart_json: cartJson('b'),
+          created_at: 2,
+          reject_reason: 'AMOUNT_EXCEEDS_CEILING',
+        },
+      ],
+    })
+    const { server } = buildServer(state, agent)
+    const client = await connectedClient(server)
+
+    const body = jsonOf<{ count: number; orders: { settlement_id: string }[] }>(
+      await client.callTool({ name: 'list_orders', arguments: { state: 'captured' } }),
+    )
+    expect(body.count).toBe(1)
+    expect(body.orders[0]?.settlement_id).toBe('s-cap')
+  })
+})

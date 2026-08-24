@@ -56,6 +56,17 @@ export type FakeFacilitatorState = {
   catalogs?: Record<string, Product[]>
   mandates?: FakeMandateRow[]
   settlementsById?: Record<string, FakeSettlementEnvelope>
+  /** Rows returned by the GET /settlements list endpoint (list_orders). */
+  settlementsList?: {
+    id: string
+    mandate_id: string
+    state: string
+    amount_paise: number
+    merchant_id: string
+    cart_json: string
+    created_at: number
+    reject_reason: string | null
+  }[]
   /** Called on every POST /settlements; return `undefined` to fall back to a default
    * `{ ok: true, settlement_id: 'settlement-1', state: 'approved' }` 202. */
   onCreateSettlement?: (call: CreateSettlementCall) => { status: number; body: unknown }
@@ -100,6 +111,10 @@ export function fakeFacilitatorFetch(state: FakeFacilitatorState): typeof fetch 
 
     if (method === 'GET' && pathname === '/mandates') {
       return jsonResponse({ ok: true, mandates: state.mandates ?? [] })
+    }
+
+    if (method === 'GET' && pathname === '/settlements') {
+      return jsonResponse({ ok: true, settlements: state.settlementsList ?? [] })
     }
 
     if (method === 'POST' && pathname === '/settlements') {

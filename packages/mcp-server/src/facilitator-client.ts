@@ -70,10 +70,25 @@ export type ProposeMandateResult = {
   approveUrl: string
 }
 
+/** A row from GET /settlements — the list view, without the per-attempt/ledger
+ * detail that getSettlement carries. `cartJson` is the stored signed cart, parsed
+ * by callers that want line items. */
+export type SettlementSummary = {
+  id: string
+  mandateId: string
+  state: string
+  amountPaise: number
+  merchantId: string
+  cartJson: string
+  createdAt: number
+  rejectReason: string | null
+}
+
 export type FacilitatorClient = {
   listStores(): Promise<StoreListItem[]>
   getCatalog(merchantId: string): Promise<Product[]>
   listMandates(): Promise<MandateRecord[]>
+  listSettlements(): Promise<SettlementSummary[]>
   getSettlement(settlementId: string): Promise<SettlementDetail | undefined>
   /** POST /mandates/propose — stages an INERT draft, never a spendable mandate. Nothing
    * this client signs; the facilitator route itself requires no auth token because a
@@ -171,6 +186,30 @@ export function createFacilitatorClient(facilitatorUrl: string): FacilitatorClie
         throw envelopeError(path, res, body)
       }
       return { proposalId: body.proposal_id, approveUrl: body.approve_url }
+    },
+
+    async listSettlements() {
+      type Row = {
+        id: string
+        mandate_id: string
+        state: string
+        amount_paise: number
+        merchant_id: string
+        cart_json: string
+        created_at: number
+        reject_reason: string | null
+      }
+      const { settlements } = await getEnvelope<{ ok: true; settlements: Row[] }>('/settlements')
+      return settlements.map((row) => ({
+        id: row.id,
+        mandateId: row.mandate_id,
+        state: row.state,
+        amountPaise: row.amount_paise,
+        merchantId: row.merchant_id,
+        cartJson: row.cart_json,
+        createdAt: row.created_at,
+        rejectReason: row.reject_reason,
+      }))
     },
 
     async getSettlement(settlementId) {

@@ -19,6 +19,7 @@ import { createFacilitatorClient, type FacilitatorClient } from './facilitator-c
 import { registerGetAgentIdentityTool } from './tools/get-agent-identity.js'
 import { registerGetOrderTool } from './tools/get-order.js'
 import { registerGetStoreInfoTool } from './tools/get-store-info.js'
+import { registerListOrdersTool } from './tools/list-orders.js'
 import { registerListStoresTool } from './tools/list-stores.js'
 import { registerPrepareMandateTool } from './tools/prepare-mandate.js'
 import { registerRequestPurchaseTool } from './tools/request-purchase.js'
@@ -81,6 +82,7 @@ export function createHundiMcpServer(deps: HundiServerDeps): McpServer {
   registerPrepareMandateTool(server, { agent: deps.agent, facilitatorClient })
   registerRequestPurchaseTool(server, { agent: deps.agent, facilitatorClient, buyerTools })
   registerGetOrderTool(server, { facilitatorClient })
+  registerListOrdersTool(server, { agent: deps.agent, facilitatorClient })
 
   return server
 }

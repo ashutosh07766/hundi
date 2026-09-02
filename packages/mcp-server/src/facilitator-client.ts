@@ -84,6 +84,14 @@ export type SettlementSummary = {
   rejectReason: string | null
 }
 
+export type SearchCatalogArgs = {
+  query: string
+  maxPricePaise?: number
+  merchantId?: string
+  inStockOnly?: boolean
+  limit?: number
+}
+
 export type OnboardStoreResult = {
   merchantId: string
   name: string
@@ -100,6 +108,10 @@ export type FacilitatorClient = {
    * a catalog available; a human-signed mandate still gates every purchase. */
   onboardStore(url: string): Promise<OnboardStoreResult>
   getCatalog(merchantId: string): Promise<Product[]>
+  /** GET /catalog/search — the one catalog read that spans every onboarded store instead
+   * of a single merchant_id. Results are ranked server-side (see the facilitator's
+   * catalog-search.ts); this client does no re-sorting or re-filtering of its own. */
+  searchCatalog(args: SearchCatalogArgs): Promise<Product[]>
   listMandates(): Promise<MandateRecord[]>
   listSettlements(): Promise<SettlementSummary[]>
   getSettlement(settlementId: string): Promise<SettlementDetail | undefined>
@@ -185,6 +197,21 @@ export function createFacilitatorClient(
       const body = await parseJson(res, path)
       if (!res.ok) throw envelopeError(path, res, body as Envelope)
       return body as Product[]
+    },
+
+    async searchCatalog(args) {
+      const params = new URLSearchParams({ q: args.query })
+      if (args.maxPricePaise !== undefined) {
+        params.set('max_price_paise', String(args.maxPricePaise))
+      }
+      if (args.merchantId !== undefined) params.set('merchant_id', args.merchantId)
+      if (args.inStockOnly) params.set('in_stock', 'true')
+      if (args.limit !== undefined) params.set('limit', String(args.limit))
+
+      const { results } = await getEnvelope<{ ok: true; results: Product[] }>(
+        `/catalog/search?${params.toString()}`,
+      )
+      return results
     },
 
     async listMandates() {

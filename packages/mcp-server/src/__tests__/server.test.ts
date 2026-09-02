@@ -1003,3 +1003,103 @@ describe('onboard_store', () => {
     expect(state.onboardCalls).toHaveLength(0)
   })
 })
+
+describe('search_catalog', () => {
+  it('returns ranked results spanning multiple stores, with a variant summary where present', async () => {
+    const state = makeFakeFacilitatorState({
+      catalogSearchResults: [
+        catalogProduct({
+          id: 'sku-001',
+          title: 'Velocity Air Runner',
+          merchant_id: 'demo-store-1',
+        }),
+        catalogProduct({
+          id: 'sku-shoe-1',
+          title: 'Trail Runner Pro',
+          merchant_id: 'demo-store-2',
+          variants: [
+            {
+              variant_id: 'v-9',
+              label: 'Size 9',
+              option_values: ['9'],
+              price_paise: 320_000,
+              available: true,
+            },
+            {
+              variant_id: 'v-10',
+              label: 'Size 10',
+              option_values: ['10'],
+              price_paise: 330_000,
+              available: false,
+            },
+          ],
+        }),
+      ],
+    })
+    const { server } = buildServer(state)
+    const client = await connectedClient(server)
+
+    const body = jsonOf<{
+      matched: number
+      results: {
+        merchant_id: string
+        sku: string
+        price_display: string
+        variant_summary?: { variant_count: number; in_stock_count: number }
+      }[]
+    }>(await client.callTool({ name: 'search_catalog', arguments: { query: 'runner' } }))
+
+    expect(body.matched).toBe(2)
+    expect(body.results.map((r) => r.merchant_id)).toEqual(['demo-store-1', 'demo-store-2'])
+    expect(body.results[0]?.price_display).toContain('3,200')
+    expect(body.results[1]?.variant_summary).toEqual({
+      variant_count: 2,
+      price_range: { min_paise: 320_000, max_paise: 330_000, display: expect.any(String) },
+      in_stock_count: 1,
+    })
+    expect(body.results[0]?.variant_summary).toBeUndefined()
+  })
+
+  it('converts max_price_rupees to paise and forwards every filter to the facilitator', async () => {
+    const state = makeFakeFacilitatorState({ catalogSearchResults: [] })
+    const { server } = buildServer(state)
+    const client = await connectedClient(server)
+
+    await client.callTool({
+      name: 'search_catalog',
+      arguments: {
+        query: 'trail shoe',
+        max_price_rupees: 1500,
+        merchant_id: 'demo-store-1',
+        in_stock_only: true,
+        limit: 10,
+      },
+    })
+
+    expect(state.catalogSearchCalls).toEqual([
+      {
+        q: 'trail shoe',
+        max_price_paise: '150000',
+        merchant_id: 'demo-store-1',
+        in_stock: 'true',
+        limit: '10',
+      },
+    ])
+  })
+
+  it('reports an honest empty result when nothing matches, rather than fabricating a listing', async () => {
+    const state = makeFakeFacilitatorState({ catalogSearchResults: [] })
+    const { server } = buildServer(state)
+    const client = await connectedClient(server)
+
+    const body = jsonOf<{ matched: number; results: unknown[] }>(
+      await client.callTool({
+        name: 'search_catalog',
+        arguments: { query: 'no such product anywhere' },
+      }),
+    )
+
+    expect(body.matched).toBe(0)
+    expect(body.results).toEqual([])
+  })
+})

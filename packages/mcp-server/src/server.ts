@@ -24,6 +24,7 @@ import { registerListStoresTool } from './tools/list-stores.js'
 import { registerOnboardStoreTool } from './tools/onboard-store.js'
 import { registerPrepareMandateTool } from './tools/prepare-mandate.js'
 import { registerRequestPurchaseTool } from './tools/request-purchase.js'
+import { registerSearchCatalogTool } from './tools/search-catalog.js'
 import { registerSearchProductsTool } from './tools/search-products.js'
 
 // Bumped alongside package.json's version — there's no build step wiring the two
@@ -86,6 +87,7 @@ export function createHundiMcpServer(deps: HundiServerDeps): McpServer {
   registerListStoresTool(server, { facilitatorClient })
   registerGetStoreInfoTool(server, { facilitatorClient })
   registerSearchProductsTool(server, { facilitatorClient })
+  registerSearchCatalogTool(server, { facilitatorClient })
   registerPrepareMandateTool(server, { agent: deps.agent, facilitatorClient })
   registerRequestPurchaseTool(server, { agent: deps.agent, facilitatorClient, buyerTools })
   registerGetOrderTool(server, { facilitatorClient })

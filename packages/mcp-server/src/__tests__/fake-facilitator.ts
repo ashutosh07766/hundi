@@ -81,15 +81,28 @@ export type FakeFacilitatorState = {
   onboardResponse?: { status: number; body: unknown }
   /** Every intercepted POST /stores/onboard call (url + onboard token header). */
   onboardCalls: { url: string; onboardToken: string | null }[]
+  /** Results returned by GET /catalog/search — the test pre-computes whatever ranked,
+   * cross-merchant list it wants the fake to hand back; this stub does no ranking of
+   * its own (the real ranking is the facilitator's, tested at that layer). */
+  catalogSearchResults?: Product[]
+  /** Every intercepted GET /catalog/search call's query params, in order — assert
+   * against this to check the tool forwarded query/max_price/merchant_id/etc. correctly. */
+  catalogSearchCalls: Record<string, string>[]
 }
 
 export function makeFakeFacilitatorState(
   overrides: Omit<
     FakeFacilitatorState,
-    'createSettlementCalls' | 'proposeMandateCalls' | 'onboardCalls'
+    'createSettlementCalls' | 'proposeMandateCalls' | 'onboardCalls' | 'catalogSearchCalls'
   > = {},
 ): FakeFacilitatorState {
-  return { ...overrides, createSettlementCalls: [], proposeMandateCalls: [], onboardCalls: [] }
+  return {
+    ...overrides,
+    createSettlementCalls: [],
+    proposeMandateCalls: [],
+    onboardCalls: [],
+    catalogSearchCalls: [],
+  }
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -107,6 +120,17 @@ export function fakeFacilitatorFetch(state: FakeFacilitatorState): typeof fetch 
 
     if (method === 'GET' && pathname === '/stores') {
       return jsonResponse({ ok: true, stores: state.stores ?? [] })
+    }
+
+    // Must be checked before the /catalog/:merchant_id startsWith branch below —
+    // same literal-before-param precedence the real facilitator's app.ts enforces
+    // by registration order (see catalog-search.ts).
+    if (method === 'GET' && pathname === '/catalog/search') {
+      const params: Record<string, string> = {}
+      for (const [key, value] of new URL(url).searchParams) params[key] = value
+      state.catalogSearchCalls.push(params)
+      const results = state.catalogSearchResults ?? []
+      return jsonResponse({ ok: true, results, count: results.length })
     }
 
     if (method === 'GET' && pathname.startsWith('/catalog/')) {

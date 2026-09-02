@@ -96,10 +96,10 @@ const BASE_INTENT: UnsignedIntent = {
   agent_pubkey_hex: 'aa'.repeat(32),
 }
 
-describe('intentSigningBytes — no goal_keywords (byte-compat regression guard)', () => {
-  it('never emits a `goal_keywords` key when the intent carries none', () => {
+describe('intentSigningBytes — no allowed_skus (byte-compat regression guard)', () => {
+  it('never emits an `allowed_skus` key when the intent carries none', () => {
     const text = decode(intentSigningBytes(BASE_INTENT))
-    expect(text).not.toContain('goal_keywords')
+    expect(text).not.toContain('allowed_skus')
   })
 
   it('matches the exact pre-goal-binding canonical shape', () => {
@@ -113,18 +113,18 @@ describe('intentSigningBytes — no goal_keywords (byte-compat regression guard)
   })
 })
 
-describe('intentSigningBytes — with goal_keywords', () => {
-  it('changes the signed bytes relative to the same intent without goal_keywords', () => {
-    const withGoal: UnsignedIntent = { ...BASE_INTENT, goal_keywords: ['running shoe'] }
-    expect(decode(intentSigningBytes(withGoal))).not.toBe(decode(intentSigningBytes(BASE_INTENT)))
+describe('intentSigningBytes — with allowed_skus', () => {
+  it('changes the signed bytes relative to the same intent without allowed_skus', () => {
+    const withSkus: UnsignedIntent = { ...BASE_INTENT, allowed_skus: ['sku-1'] }
+    expect(decode(intentSigningBytes(withSkus))).not.toBe(decode(intentSigningBytes(BASE_INTENT)))
   })
 
-  it('includes goal_keywords in the signed bytes', () => {
-    const withGoal: UnsignedIntent = {
+  it('includes allowed_skus in the signed bytes', () => {
+    const withSkus: UnsignedIntent = {
       ...BASE_INTENT,
-      goal_keywords: ['running shoe', 'sneaker'],
+      allowed_skus: ['sku-1', 'sku-2'],
     }
-    const text = decode(intentSigningBytes(withGoal))
-    expect(text).toContain('"goal_keywords":["running shoe","sneaker"]')
+    const text = decode(intentSigningBytes(withSkus))
+    expect(text).toContain('"allowed_skus":["sku-1","sku-2"]')
   })
 })

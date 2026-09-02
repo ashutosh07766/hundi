@@ -47,15 +47,18 @@ export type IntentMandate = {
    * drain the whole ceiling hands-free. Absent → only the per-cart threshold
    * applies, byte-identical to the pre-policy shape. */
   cumulative_approval_threshold_paise?: number | undefined
-  /** Optional purpose restriction (signed). When set, every cart item must match at
-   * least one keyword (case-insensitive substring) against the product text the
-   * facilitator resolves for it — a "running shoes" mandate can't quietly buy a
-   * blender. A cart item whose product text can't be resolved fails closed rather
-   * than passing unchecked, since the human explicitly scoped what this money is
-   * for. Absent entirely (never `null`) leaves the signing bytes byte-identical to
-   * the pre-goal-binding shape, same convention as the other optional policy fields
-   * above. */
-  goal_keywords?: string[] | undefined
+  /** Optional purpose restriction (signed): the exact set of SKUs this mandate may
+   * buy. When set, every cart item's `sku` must be a member — a "running shoes"
+   * mandate is pinned to the shoe SKUs the human authorized, and nothing else.
+   * The gate is pure set membership between two SIGNED sets (the human's allowed
+   * list and the agent's cart, whose SKU is separately price-checked against the
+   * live catalog), so the party being gated cannot control the decision: the
+   * merchant can't add a SKU to the human's signed list, and the agent can't buy a
+   * SKU that isn't on it. Deliberately NOT matched against merchant-controlled
+   * product text (title/description), which the gated side could stuff. Absent
+   * entirely (never `null`) leaves the signing bytes byte-identical to the
+   * pre-restriction shape, same convention as the other optional fields above. */
+  allowed_skus?: string[] | undefined
   sig: SigEnvelope
 }
 
@@ -117,7 +120,7 @@ export function intentSigningBytes(intent: Omit<IntentMandate, 'sig'>): Uint8Arr
     ...(intent.cumulative_approval_threshold_paise !== undefined
       ? { cumulative_approval_threshold_paise: intent.cumulative_approval_threshold_paise }
       : {}),
-    ...(intent.goal_keywords ? { goal_keywords: intent.goal_keywords } : {}),
+    ...(intent.allowed_skus ? { allowed_skus: intent.allowed_skus } : {}),
   })
 }
 

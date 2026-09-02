@@ -70,14 +70,6 @@ export type VerifyCtx = {
    */
   merchantSpentPaise?: number
   catalogPrices?: Record<string, number>
-  /**
-   * Per-sku searchable product text (title + brand + description, lowercased),
-   * only consulted when the intent carries `goal_keywords`. The facilitator
-   * resolves this from the cart's merchant catalog; a sku with no entry here is
-   * exactly what makes an unverifiable product fail closed rather than pass
-   * unchecked (see the `goal_keywords` enforcement below).
-   */
-  itemGoalTexts?: Record<string, string>
   duplicateCart: boolean
   /** Unix-seconds grace window applied to `expires_at`. Default 60. */
   clockSkewSec?: number
@@ -151,12 +143,12 @@ function validateIntentSchema(intent: IntentMandate): string | undefined {
   ) {
     return 'cumulative_approval_threshold_paise must be a non-negative integer'
   }
-  if (intent.goal_keywords !== undefined) {
-    if (!Array.isArray(intent.goal_keywords) || intent.goal_keywords.length === 0) {
-      return 'goal_keywords must be a non-empty array of non-empty strings'
+  if (intent.allowed_skus !== undefined) {
+    if (!Array.isArray(intent.allowed_skus) || intent.allowed_skus.length === 0) {
+      return 'allowed_skus must be a non-empty array of non-empty strings'
     }
-    if (!intent.goal_keywords.every(isNonEmptyString)) {
-      return 'goal_keywords must be a non-empty array of non-empty strings'
+    if (!intent.allowed_skus.every(isNonEmptyString)) {
+      return 'allowed_skus must be a non-empty array of non-empty strings'
     }
   }
   if (!isValidSigEnvelope(intent.sig)) return 'sig is not a valid signature envelope'
@@ -258,22 +250,21 @@ export function verifyChain(
 
   if (ctx.revoked) return fail('MANDATE_REVOKED')
 
-  // Goal binding: when the human restricted the mandate's purpose, every cart item
-  // must match at least one keyword against its resolved product text. Checked here
-  // — after mandate liveness and merchant scope, alongside the budget checks below
-  // — because it's another purchase-scope guard layered on top of raw authorization,
-  // not a more fundamental liveness/identity check. A sku with no resolved text
-  // fails closed: the human constrained the goal, so a product that can't be
-  // verified against it is out of scope by default, not silently let through.
-  if (intent.goal_keywords && intent.goal_keywords.length > 0) {
-    const keywordsLower = intent.goal_keywords.map((k) => k.toLowerCase())
+  // Purpose binding: when the human pinned the mandate to a specific SKU set,
+  // every cart item's sku must be a member — pure set membership between two
+  // SIGNED sets. The classification the gate reads (the sku) is NOT merchant-
+  // controlled free text; the merchant can't add a sku to the human's signed
+  // allow-list, and the agent's cart sku is separately price-checked against the
+  // live catalog, so neither gated party can steer the decision. Checked after
+  // liveness/scope, alongside the budget checks, as another purchase-scope guard.
+  if (intent.allowed_skus && intent.allowed_skus.length > 0) {
+    const allowed = new Set(intent.allowed_skus)
     for (const item of cart.items) {
-      const text = ctx.itemGoalTexts?.[item.sku]
-      if (text === undefined) {
-        return fail('GOAL_MISMATCH', `sku ${item.sku} has no resolvable product text to check`)
-      }
-      if (!keywordsLower.some((kw) => text.includes(kw))) {
-        return fail('GOAL_MISMATCH', `sku ${item.sku} matches none of the mandate's goal_keywords`)
+      if (!allowed.has(item.sku)) {
+        return fail(
+          'GOAL_MISMATCH',
+          `sku ${item.sku} is not in the mandate's allowed set [${intent.allowed_skus.join(', ')}]`,
+        )
       }
     }
   }

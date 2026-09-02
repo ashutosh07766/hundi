@@ -302,84 +302,70 @@ describe('verifyChain — one row per RejectionCode', () => {
   })
 })
 
-describe('verifyChain — goal_keywords (intent-binding)', () => {
-  it('accepts when goal_keywords is absent, regardless of itemGoalTexts', () => {
+describe('verifyChain — allowed_skus (intent-binding)', () => {
+  it('accepts when allowed_skus is absent, regardless of the cart sku', () => {
     const { intent, agent } = makeIntent()
     const cart = makeCart({ agent, intent })
     const result = verifyChain(intent, cart, baseCtx({ credential: credentialFor(agent) }))
     expect(result.ok).toBe(true)
   })
 
-  it('accepts a cart item whose resolved text matches a goal keyword', () => {
-    const { intent, agent } = makeIntent({
-      overrides: { goal_keywords: ['running shoe', 'sneaker'] },
-    })
+  it('accepts a cart item whose sku is a member of allowed_skus', () => {
+    // makeCart's default item sku is 'sku-1' — the happy-path member case.
+    const { intent, agent } = makeIntent({ overrides: { allowed_skus: ['sku-1'] } })
     const cart = makeCart({ agent, intent })
-    const result = verifyChain(
-      intent,
-      cart,
-      baseCtx({
-        credential: credentialFor(agent),
-        itemGoalTexts: { 'sku-1': 'velocity air running shoe, size 11' },
-      }),
-    )
+    const result = verifyChain(intent, cart, baseCtx({ credential: credentialFor(agent) }))
     expect(result.ok).toBe(true)
   })
 
-  it('GOAL_MISMATCH: cart item text matches none of the goal_keywords', () => {
-    const { intent, agent } = makeIntent({
-      overrides: { goal_keywords: ['running shoe', 'sneaker'] },
+  it('GOAL_MISMATCH: cart item sku is not a member of allowed_skus, and the detail lists the allowed set', () => {
+    const { intent, agent } = makeIntent({ overrides: { allowed_skus: ['sku-1'] } })
+    const cart = makeCart({
+      agent,
+      intent,
+      items: [{ sku: 'sku-2', qty: 1, unit_price_paise: 100_000 }],
     })
-    const cart = makeCart({ agent, intent })
-    const result = verifyChain(
-      intent,
-      cart,
-      baseCtx({
-        credential: credentialFor(agent),
-        itemGoalTexts: { 'sku-1': 'countertop blender 600w' },
-      }),
-    )
+    const result = verifyChain(intent, cart, baseCtx({ credential: credentialFor(agent) }))
     expect(result).toMatchObject({ ok: false, reason: 'GOAL_MISMATCH' })
+    if (!result.ok) {
+      expect(result.detail).toContain('sku-2')
+      expect(result.detail).toContain('sku-1')
+    }
   })
 
-  it('GOAL_MISMATCH: fails closed when the sku has no resolved goal text at all', () => {
-    const { intent, agent } = makeIntent({ overrides: { goal_keywords: ['running shoe'] } })
-    const cart = makeCart({ agent, intent })
-    const result = verifyChain(
-      intent,
-      cart,
-      baseCtx({ credential: credentialFor(agent), itemGoalTexts: {} }),
-    )
-    expect(result).toMatchObject({ ok: false, reason: 'GOAL_MISMATCH' })
-  })
-
-  it('matching is case-insensitive', () => {
-    const { intent, agent } = makeIntent({ overrides: { goal_keywords: ['Running Shoe'] } })
-    const cart = makeCart({ agent, intent })
-    const result = verifyChain(
-      intent,
-      cart,
-      baseCtx({
-        credential: credentialFor(agent),
-        itemGoalTexts: { 'sku-1': 'velocity running shoe' },
-      }),
-    )
-    expect(result.ok).toBe(true)
-  })
-
-  it('SCHEMA_INVALID: empty goal_keywords array', () => {
-    const { intent, agent } = makeIntent({ overrides: { goal_keywords: [] } })
+  it('SCHEMA_INVALID: empty allowed_skus array', () => {
+    const { intent, agent } = makeIntent({ overrides: { allowed_skus: [] } })
     const cart = makeCart({ agent, intent })
     const result = verifyChain(intent, cart, baseCtx({ credential: credentialFor(agent) }))
     expect(result).toMatchObject({ ok: false, reason: 'SCHEMA_INVALID' })
   })
 
-  it('signed goal_keywords is tamper-evident: loosening the list after signing fails SIG_INVALID_INTENT', () => {
-    const { intent, agent } = makeIntent({ overrides: { goal_keywords: ['running shoe'] } })
-    // Swap in a keyword the human never signed off on — the signature must reject it.
-    const tampered = { ...intent, goal_keywords: ['blender'] }
+  it('signed allowed_skus is tamper-evident: loosening the set after signing fails SIG_INVALID_INTENT', () => {
+    const { intent, agent } = makeIntent({ overrides: { allowed_skus: ['sku-1'] } })
+    // Swap in a sku the human never signed off on — the signature must reject it.
+    const tampered = { ...intent, allowed_skus: ['sku-2'] }
     const cart = makeCart({ agent, intent: tampered })
     const result = verifyChain(tampered, cart, baseCtx({ credential: credentialFor(agent) }))
+    expect(result).toMatchObject({ ok: false, reason: 'SIG_INVALID_INTENT' })
+  })
+
+  it('downgrade resistance: stripping allowed_skus after signing does not fall through to an unconstrained pass', () => {
+    const { intent, agent } = makeIntent({ overrides: { allowed_skus: ['sku-1'] } })
+    // An attacker who deletes the field entirely (rather than editing it) must be
+    // caught the same way as any other tamper — the field's presence is part of
+    // what was signed, so removing it changes the signed bytes just like editing it.
+    const downgraded = { ...intent } as Partial<typeof intent>
+    delete downgraded.allowed_skus
+    const cart = makeCart({
+      agent,
+      intent: downgraded as typeof intent,
+      items: [{ sku: 'sku-2', qty: 1, unit_price_paise: 100_000 }],
+    })
+    const result = verifyChain(
+      downgraded as typeof intent,
+      cart,
+      baseCtx({ credential: credentialFor(agent) }),
+    )
     expect(result).toMatchObject({ ok: false, reason: 'SIG_INVALID_INTENT' })
   })
 })

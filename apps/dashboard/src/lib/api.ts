@@ -198,10 +198,10 @@ export type MandateProposal = {
   per_merchant_ceiling_paise?: Record<string, number> | undefined
   cumulative_approval_threshold_paise?: number | undefined
   /** Optional purpose restriction — present only when the agent asked for one. See
-   * IntentMandate's own `goal_keywords` (@hundi/core's mandate.ts) for what it means;
+   * IntentMandate's own `allowed_skus` (@hundi/core's mandate.ts) for what it means;
    * the proposal carries it so the one-tap approval can sign it into the real
    * mandate unchanged. */
-  goal_keywords?: string[] | undefined
+  allowed_skus?: string[] | undefined
 }
 
 /** GET /mandates/proposals[?status=] — no dashboard token required; this is the same

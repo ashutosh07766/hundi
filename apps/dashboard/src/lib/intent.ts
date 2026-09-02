@@ -37,10 +37,10 @@ export type CeremonyInput = {
    * `intentSigningBytes` produces the pre-policy byte shape. */
   perMerchantCeilingPaise?: Record<string, number> | undefined
   cumulativeApprovalThresholdPaise?: number | undefined
-  /** Optional purpose restriction — see IntentMandate's own `goal_keywords` in
+  /** Optional purpose restriction — see IntentMandate's own `allowed_skus` in
    * @hundi/core's mandate.ts. Carried through as-is into the signed intent; omit
    * entirely (never pass an empty array) when the ceremony sets no restriction. */
-  goalKeywords?: string[] | undefined
+  allowedSkus?: string[] | undefined
 }
 
 export type SignedCeremony = {
@@ -77,7 +77,7 @@ export async function buildSignedIntent(
     ...(input.cumulativeApprovalThresholdPaise !== undefined
       ? { cumulative_approval_threshold_paise: input.cumulativeApprovalThresholdPaise }
       : {}),
-    ...(input.goalKeywords ? { goal_keywords: input.goalKeywords } : {}),
+    ...(input.allowedSkus ? { allowed_skus: input.allowedSkus } : {}),
   }
   // The signature must cover the policy fields, not just store them — sign AFTER
   // they're folded into `unsigned` so intentSigningBytes (which includes them when
@@ -100,7 +100,7 @@ export type MandateProposalForIntent = {
   expires_at: number
   per_merchant_ceiling_paise?: Record<string, number> | undefined
   cumulative_approval_threshold_paise?: number | undefined
-  goal_keywords?: string[] | undefined
+  allowed_skus?: string[] | undefined
 }
 
 /** Maps a facilitator mandate proposal directly onto `buildSignedIntent`'s paise-
@@ -125,7 +125,7 @@ export function ceremonyInputFromProposal(proposal: MandateProposalForIntent): C
     ...(proposal.cumulative_approval_threshold_paise !== undefined
       ? { cumulativeApprovalThresholdPaise: proposal.cumulative_approval_threshold_paise }
       : {}),
-    ...(proposal.goal_keywords ? { goalKeywords: proposal.goal_keywords } : {}),
+    ...(proposal.allowed_skus ? { allowedSkus: proposal.allowed_skus } : {}),
   }
 }
 

@@ -182,8 +182,8 @@ describe('buildSignedIntent — spending policy', () => {
   })
 })
 
-describe('buildSignedIntent — goal_keywords (intent-binding)', () => {
-  it('signs goal_keywords into the intent — the signature covers them, not just storage', async () => {
+describe('buildSignedIntent — allowed_skus (intent-binding)', () => {
+  it('signs allowed_skus into the intent — the signature covers them, not just storage', async () => {
     const human = generateKeypair()
     const { intent, credential } = await buildSignedIntent(
       {
@@ -193,26 +193,26 @@ describe('buildSignedIntent — goal_keywords (intent-binding)', () => {
         merchants: ['merchant-1'],
         expiresAt: Math.floor(Date.now() / 1000) + 3600,
         agentPubkeyHex: AGENT_PUBKEY,
-        goalKeywords: ['running shoe', 'sneaker'],
+        allowedSkus: ['sku-shoe-1', 'sku-shoe-2'],
       },
       ed25519Signer(human),
       ed25519Credential(human),
     )
 
-    expect(intent.goal_keywords).toEqual(['running shoe', 'sneaker'])
+    expect(intent.allowed_skus).toEqual(['sku-shoe-1', 'sku-shoe-2'])
 
-    // The signature verifies over the intent AS SIGNED, which includes goal_keywords.
+    // The signature verifies over the intent AS SIGNED, which includes allowed_skus.
     const bytes = intentSigningBytes(intent)
     expect(verifyMandateSignature(bytes, intent.sig, credential)).toBe(true)
 
-    // Tampering with the list after signing must invalidate the signature — proof the
-    // signed bytes actually depend on goal_keywords, not just that it sits alongside a
+    // Tampering with the set after signing must invalidate the signature — proof the
+    // signed bytes actually depend on allowed_skus, not just that it sits alongside a
     // signature over something else.
-    const tampered = intentSigningBytes({ ...intent, goal_keywords: ['blender'] })
+    const tampered = intentSigningBytes({ ...intent, allowed_skus: ['sku-blender'] })
     expect(verifyMandateSignature(tampered, intent.sig, credential)).toBe(false)
   })
 
-  it('omits goal_keywords entirely (not undefined-valued) when the ceremony sets none — byte-compat', async () => {
+  it('omits allowed_skus entirely (not undefined-valued) when the ceremony sets none — byte-compat', async () => {
     const human = generateKeypair()
     const { intent } = await buildSignedIntent(
       {
@@ -226,7 +226,7 @@ describe('buildSignedIntent — goal_keywords (intent-binding)', () => {
       ed25519Signer(human),
       ed25519Credential(human),
     )
-    expect('goal_keywords' in intent).toBe(false)
+    expect('allowed_skus' in intent).toBe(false)
   })
 })
 
@@ -279,16 +279,16 @@ describe('ceremonyInputFromProposal', () => {
     const input = ceremonyInputFromProposal(proposal)
     expect('perMerchantCeilingPaise' in input).toBe(false)
     expect('cumulativeApprovalThresholdPaise' in input).toBe(false)
-    expect('goalKeywords' in input).toBe(false)
+    expect('allowedSkus' in input).toBe(false)
   })
 
-  it('carries goal_keywords through when the proposal sets it', () => {
-    const withGoal: MandateProposalForIntent = {
+  it('carries allowed_skus through when the proposal sets it', () => {
+    const withSkus: MandateProposalForIntent = {
       ...proposal,
-      goal_keywords: ['running shoe', 'sneaker'],
+      allowed_skus: ['sku-shoe-1', 'sku-shoe-2'],
     }
-    const input = ceremonyInputFromProposal(withGoal)
-    expect(input.goalKeywords).toEqual(['running shoe', 'sneaker'])
+    const input = ceremonyInputFromProposal(withSkus)
+    expect(input.allowedSkus).toEqual(['sku-shoe-1', 'sku-shoe-2'])
   })
 
   it('feeds buildSignedIntent to produce a mandate core.verifyMandateSignature accepts', async () => {

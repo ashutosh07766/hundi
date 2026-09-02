@@ -92,10 +92,10 @@ export function MandateProposalCard({ proposal, highlighted, onApproved }: Props
             <dd>{formatPaise(proposal.cumulative_approval_threshold_paise)}</dd>
           </div>
         )}
-        {proposal.goal_keywords && proposal.goal_keywords.length > 0 && (
+        {proposal.allowed_skus && proposal.allowed_skus.length > 0 && (
           <div className="mandate-card__stat">
-            <dt>Restricted to</dt>
-            <dd>{proposal.goal_keywords.join(', ')}</dd>
+            <dt>Restricted to {proposal.allowed_skus.length} product(s)</dt>
+            <dd>{proposal.allowed_skus.join(', ')}</dd>
           </div>
         )}
       </dl>

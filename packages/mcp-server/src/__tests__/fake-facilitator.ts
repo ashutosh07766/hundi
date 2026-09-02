@@ -91,12 +91,24 @@ export type FakeFacilitatorState = {
   /** Every intercepted GET /catalog/search call's query params, in order — assert
    * against this to check the tool forwarded query/max_price/merchant_id/etc. correctly. */
   catalogSearchCalls: Record<string, string>[]
+  /** Results returned by GET /catalog/:merchant_id/upsell — the test pre-computes
+   * whatever ranked list it wants the fake to hand back; this stub does no ranking
+   * of its own (the real ranking is the facilitator's, tested at that layer). */
+  upsellResults?: Product[]
+  /** Every intercepted GET /catalog/:merchant_id/upsell call's merchant_id + query
+   * params, in order — assert against this to check the tool forwarded sku/limit
+   * correctly. */
+  upsellCalls: { merchantId: string; params: Record<string, string> }[]
 }
 
 export function makeFakeFacilitatorState(
   overrides: Omit<
     FakeFacilitatorState,
-    'createSettlementCalls' | 'proposeMandateCalls' | 'onboardCalls' | 'catalogSearchCalls'
+    | 'createSettlementCalls'
+    | 'proposeMandateCalls'
+    | 'onboardCalls'
+    | 'catalogSearchCalls'
+    | 'upsellCalls'
   > = {},
 ): FakeFacilitatorState {
   return {
@@ -105,6 +117,7 @@ export function makeFakeFacilitatorState(
     proposeMandateCalls: [],
     onboardCalls: [],
     catalogSearchCalls: [],
+    upsellCalls: [],
   }
 }
 
@@ -134,6 +147,18 @@ export function fakeFacilitatorFetch(state: FakeFacilitatorState): typeof fetch 
       state.catalogSearchCalls.push(params)
       const results = state.catalogSearchResults ?? []
       return jsonResponse({ ok: true, results, count: results.length })
+    }
+
+    // Must be checked before the /catalog/:merchant_id startsWith branch below —
+    // same literal-before-param precedence /catalog/search needs (see above).
+    const upsellMatch = pathname.match(/^\/catalog\/([^/]+)\/upsell$/)
+    if (method === 'GET' && upsellMatch) {
+      const merchantId = decodeURIComponent(upsellMatch[1] as string)
+      const params: Record<string, string> = {}
+      for (const [key, value] of new URL(url).searchParams) params[key] = value
+      state.upsellCalls.push({ merchantId, params })
+      const results = state.upsellResults ?? []
+      return jsonResponse({ ok: true, sku: params.sku, results, count: results.length })
     }
 
     if (method === 'GET' && pathname.startsWith('/catalog/')) {

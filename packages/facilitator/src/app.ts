@@ -20,6 +20,7 @@ import { registerRefundRoutes } from './routes/refund.js'
 import { registerRevokeRoute } from './routes/revoke.js'
 import { registerSettlementRoutes } from './routes/settlements.js'
 import { registerStoreRoutes } from './routes/stores.js'
+import { registerUpsellRoute } from './routes/upsell.js'
 import { registerVerifyRoute } from './routes/verify.js'
 import { registerWebhookRoutes } from './routes/webhook.js'
 
@@ -77,8 +78,11 @@ export function createApp(deps: AppDeps): Hono {
   registerReadRoutes(app, deps)
   // Must precede registerStoreRoutes — see catalog-search.ts's header comment on
   // why the literal /catalog/search path has to win over the /catalog/:merchant_id
-  // param route it would otherwise collide with.
+  // param route it would otherwise collide with. The upsell route's extra path
+  // segment (/catalog/:merchant_id/upsell) doesn't collide the same way, but it's
+  // registered here too so every /catalog/* read route lives in one place.
   registerCatalogSearchRoute(app, deps)
+  registerUpsellRoute(app, deps)
   registerStoreRoutes(app, deps)
   registerAgentRoutes(app, deps)
 

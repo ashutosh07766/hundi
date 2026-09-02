@@ -57,7 +57,7 @@ describe('structural — no payment-provider or approval/revoke surface', () => 
     }
   })
 
-  it('exposes exactly the ten shopping tools — no approve/revoke/refund/settle tool exists', async () => {
+  it('exposes exactly the eleven shopping tools — no approve/revoke/refund/settle tool exists', async () => {
     const agent = generateAgentKeypair()
     const state = makeFakeFacilitatorState({})
     const facilitatorUrl = 'http://fake-facilitator.test'
@@ -79,6 +79,7 @@ describe('structural — no payment-provider or approval/revoke surface', () => 
           'get_store_info',
           'search_products',
           'search_catalog',
+          'get_upsell',
           'prepare_mandate',
           'request_purchase',
           'get_order',

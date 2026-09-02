@@ -101,6 +101,12 @@ export type SearchCatalogArgs = {
   limit?: number
 }
 
+export type GetUpsellArgs = {
+  merchantId: string
+  sku: string
+  limit?: number
+}
+
 export type OnboardStoreResult = {
   merchantId: string
   name: string
@@ -121,6 +127,10 @@ export type FacilitatorClient = {
    * of a single merchant_id. Results are ranked server-side (see the facilitator's
    * catalog-search.ts); this client does no re-sorting or re-filtering of its own. */
   searchCatalog(args: SearchCatalogArgs): Promise<Product[]>
+  /** GET /catalog/:merchant_id/upsell — deterministic, LLM-free complementary-product
+   * suggestions for one sku (see the facilitator's upsell route). This client does no
+   * ranking of its own; it forwards the request and types the response. */
+  getUpsell(args: GetUpsellArgs): Promise<Product[]>
   listMandates(): Promise<MandateRecord[]>
   listSettlements(): Promise<SettlementSummary[]>
   getSettlement(settlementId: string): Promise<SettlementDetail | undefined>
@@ -219,6 +229,16 @@ export function createFacilitatorClient(
 
       const { results } = await getEnvelope<{ ok: true; results: Product[] }>(
         `/catalog/search?${params.toString()}`,
+      )
+      return results
+    },
+
+    async getUpsell(args) {
+      const params = new URLSearchParams({ sku: args.sku })
+      if (args.limit !== undefined) params.set('limit', String(args.limit))
+
+      const { results } = await getEnvelope<{ ok: true; results: Product[] }>(
+        `/catalog/${encodeURIComponent(args.merchantId)}/upsell?${params.toString()}`,
       )
       return results
     },

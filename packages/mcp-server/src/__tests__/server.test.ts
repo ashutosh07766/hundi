@@ -1103,3 +1103,49 @@ describe('search_catalog', () => {
     expect(body.results).toEqual([])
   })
 })
+
+describe('get_upsell', () => {
+  it('maps the facilitator upsell results into structured suggestions, forwarding merchant_id/sku/limit', async () => {
+    const state = makeFakeFacilitatorState({
+      upsellResults: [
+        catalogProduct({ id: 'sku-socks', title: 'Trail Socks', brand: 'Velocity Run' }),
+      ],
+    })
+    const { server } = buildServer(state)
+    const client = await connectedClient(server)
+
+    const body = jsonOf<{
+      merchant_id: string
+      sku: string
+      suggested: number
+      suggestions: { sku: string; title: string; brand: string; price_display: string }[]
+    }>(
+      await client.callTool({
+        name: 'get_upsell',
+        arguments: { merchant_id: 'demo-store-1', sku: 'sku-001', limit: 3 },
+      }),
+    )
+
+    expect(body.suggested).toBe(1)
+    expect(body.suggestions[0]).toMatchObject({ sku: 'sku-socks', title: 'Trail Socks' })
+    expect(state.upsellCalls).toEqual([
+      { merchantId: 'demo-store-1', params: { sku: 'sku-001', limit: '3' } },
+    ])
+  })
+
+  it('reports an honest empty result when nothing complements the sku', async () => {
+    const state = makeFakeFacilitatorState({ upsellResults: [] })
+    const { server } = buildServer(state)
+    const client = await connectedClient(server)
+
+    const body = jsonOf<{ suggested: number; suggestions: unknown[] }>(
+      await client.callTool({
+        name: 'get_upsell',
+        arguments: { merchant_id: 'demo-store-1', sku: 'sku-001' },
+      }),
+    )
+
+    expect(body.suggested).toBe(0)
+    expect(body.suggestions).toEqual([])
+  })
+})

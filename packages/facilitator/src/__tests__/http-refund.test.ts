@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { RazorpayApiError } from '../razorpay-client.js'
 import { makeFakeRazorpay } from './executor-helpers.js'
 import { insertAttempt, insertSettlement } from './helpers.js'
 import { makeTestApp, postJson, TEST_ENV } from './http-helpers.js'
@@ -107,6 +108,41 @@ describe('POST /settlements/:id/refund', () => {
       )
       .get(settlementId) as { c: number }
     expect(count.c).toBe(1)
+  })
+
+  it('maps a Razorpay failure to 502 REFUND_PROVIDER_ERROR (with the provider reason) and writes no ledger event', async () => {
+    const razorpay = makeFakeRazorpay({
+      async refundPayment() {
+        throw new RazorpayApiError(400, {
+          error: {
+            code: 'BAD_REQUEST_ERROR',
+            description: 'The payment has been fully refunded already',
+          },
+        })
+      },
+    })
+    const { app, db } = makeTestApp({ razorpay })
+    const settlementId = insertSettlement(db, { state: 'captured', amount_paise: 10_000 })
+    insertAttempt(db, {
+      settlement_id: settlementId,
+      state: 'captured',
+      provider_payment_id: 'pay_test_poison',
+    })
+
+    const res = await postJson(app, `/settlements/${settlementId}/refund`, {}, DASHBOARD_HEADERS)
+    expect(res.status).toBe(502)
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      error: 'REFUND_PROVIDER_ERROR',
+      reason: 'The payment has been fully refunded already',
+    })
+    // A provider failure must not leave a phantom refund_issued behind.
+    const count = db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM ledger_events WHERE event_type = 'refund_issued' AND settlement_id = ?`,
+      )
+      .get(settlementId) as { c: number }
+    expect(count.c).toBe(0)
   })
 
   it('rejects without the dashboard token', async () => {

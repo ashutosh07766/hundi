@@ -29,6 +29,61 @@ function applyColumnMigrations(db: Database.Database): void {
   }
 }
 
+/** The quoted values inside `ledger_events`' `event_type IN (...)` CHECK, parsed
+ * from a `CREATE TABLE` statement (the live table's or schema.sql's). */
+function ledgerEventTypeCheckValues(createTableSql: string): Set<string> {
+  const inClause = createTableSql.match(
+    /event_type\s+TEXT\s+NOT\s+NULL\s+CHECK\s*\([^)]*\(([^)]*)\)/is,
+  )
+  return new Set(
+    [...(inClause?.[1] ?? '').matchAll(/'([^']+)'/g)].flatMap((m) => (m[1] ? [m[1]] : [])),
+  )
+}
+
+/**
+ * Heals a stale `event_type` CHECK on an older `ledger_events`. `CREATE TABLE IF
+ * NOT EXISTS` never rewrites an existing table's CHECK and SQLite has no `ALTER …
+ * ALTER CONSTRAINT`, so a DB created before a new event type was added still
+ * rejects it — the append fails at write time even though schema.sql lists it.
+ *
+ * The fix is a table rebuild: rename aside, recreate from the current schema,
+ * copy every row verbatim (seq/prev_hash/row_hash included, so the hash chain
+ * stays valid — verifyLedger re-hashes the copied bytes to the same digests),
+ * drop the old. Nothing FK-references ledger_events, and its append-only
+ * triggers guard UPDATE/DELETE, not the INSERT-copy or the DROP — but the
+ * triggers are dropped first so schema.sql's `CREATE TRIGGER IF NOT EXISTS`
+ * re-binds them to the new table instead of no-op'ing on the stale names.
+ *
+ * Runs only when the live CHECK is missing a value the current schema allows, so
+ * it is a cheap sqlite_master read once healed. Additive-only by construction: a
+ * value the live table permits but the schema dropped would still round-trip.
+ */
+function healLedgerEventTypeCheck(db: Database.Database): void {
+  const live = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='ledger_events'")
+    .get() as { sql: string } | undefined
+  if (!live) return
+
+  const allowed = ledgerEventTypeCheckValues(SCHEMA_SQL)
+  const present = ledgerEventTypeCheckValues(live.sql)
+  const missingAllowedValue = [...allowed].some((v) => !present.has(v))
+  if (!missingAllowedValue) return
+
+  db.transaction(() => {
+    db.exec(
+      'DROP TRIGGER IF EXISTS ledger_events_no_update; DROP TRIGGER IF EXISTS ledger_events_no_delete;',
+    )
+    db.exec('ALTER TABLE ledger_events RENAME TO ledger_events_old')
+    db.exec(SCHEMA_SQL)
+    db.exec(
+      `INSERT INTO ledger_events (seq, event_type, settlement_id, actor, payload, prev_hash, row_hash, created_at)
+       SELECT seq, event_type, settlement_id, actor, payload, prev_hash, row_hash, created_at
+       FROM ledger_events_old`,
+    )
+    db.exec('DROP TABLE ledger_events_old')
+  })()
+}
+
 /**
  * Opens (creating if absent) the facilitator SQLite database at `path`, or an
  * in-memory database for `':memory:'`. Schema application is idempotent —
@@ -46,6 +101,7 @@ export function openDb(path: string): Database.Database {
   db.pragma('foreign_keys = ON')
   db.exec(SCHEMA_SQL)
   applyColumnMigrations(db)
+  healLedgerEventTypeCheck(db)
   return db
 }
 

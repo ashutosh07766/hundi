@@ -6,7 +6,7 @@
  * rejection — carries the same `{ok:false,error,reason?}` shape.
  */
 
-export type HttpStatus = 200 | 201 | 202 | 400 | 401 | 404 | 409 | 500
+export type HttpStatus = 200 | 201 | 202 | 400 | 401 | 404 | 409 | 500 | 502
 
 export class RouteError extends Error {
   readonly status: HttpStatus

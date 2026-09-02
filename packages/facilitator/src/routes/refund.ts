@@ -4,6 +4,18 @@ import { tx } from '../db/index.js'
 import { RouteError } from '../errors.js'
 import { appendLedger } from '../ledger.js'
 import { requireHeaderToken } from '../middleware.js'
+import { RazorpayApiError } from '../razorpay-client.js'
+
+/** Best-effort human-readable reason out of a Razorpay error envelope
+ * (`{ error: { description } }`), falling back to the raw message. */
+function providerErrorDetail(err: RazorpayApiError): string {
+  const body = err.body
+  if (body && typeof body === 'object' && 'error' in body) {
+    const inner = (body as { error?: { description?: unknown } }).error
+    if (inner && typeof inner.description === 'string') return inner.description
+  }
+  return err.message
+}
 
 type SettlementStateRow = { id: string; state: string; amount_paise: number }
 type CapturedAttemptRow = { id: string; provider_payment_id: string | null }
@@ -84,10 +96,23 @@ export function registerRefundRoutes(app: Hono, { db, razorpay, env }: AppDeps):
       }
       const paymentId = attempt.provider_payment_id
 
-      const refund = await razorpay.refundPayment({
-        paymentId,
-        idempotencyKey: `refund-${id}-${paymentId}`,
-      })
+      // The idempotency key makes a retried refund a no-op on Razorpay's side
+      // (it replays the original), so this call is safe to reach more than once.
+      // A genuine provider failure surfaces as a 502 with the provider's own
+      // reason rather than a bare 500 — the refund never wrote to our ledger, so
+      // the dashboard can retry once the underlying cause clears.
+      let refund: Awaited<ReturnType<typeof razorpay.refundPayment>>
+      try {
+        refund = await razorpay.refundPayment({
+          paymentId,
+          idempotencyKey: `refund-${id}-${paymentId}`,
+        })
+      } catch (err) {
+        if (err instanceof RazorpayApiError) {
+          throw new RouteError(502, 'REFUND_PROVIDER_ERROR', providerErrorDetail(err))
+        }
+        throw err
+      }
 
       tx(db, () => {
         appendLedger(db, {

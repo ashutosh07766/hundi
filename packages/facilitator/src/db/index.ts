@@ -6,10 +6,34 @@ const SCHEMA_PATH = fileURLToPath(new URL('./schema.sql', import.meta.url))
 const SCHEMA_SQL = readFileSync(SCHEMA_PATH, 'utf8')
 
 /**
+ * Additive column migrations for tables that already exist in an older DB file.
+ * `CREATE TABLE IF NOT EXISTS` in schema.sql never adds a column to a table that
+ * already exists, so a column added to a table's definition after the DB was
+ * first created must be backfilled here. SQLite has no `ADD COLUMN IF NOT EXISTS`,
+ * so each is guarded by a `table_info` check. Additive only — never drop/rename
+ * (those need a real migration + backfill, not this). Table/column/type strings
+ * are constants below, never user input, so the interpolation is safe.
+ */
+const COLUMN_MIGRATIONS: readonly { table: string; column: string; ddl: string }[] = [
+  { table: 'mandate_proposals', column: 'per_merchant_ceiling_json', ddl: 'TEXT' },
+  { table: 'mandate_proposals', column: 'cumulative_approval_threshold_paise', ddl: 'INTEGER' },
+]
+
+function applyColumnMigrations(db: Database.Database): void {
+  for (const { table, column, ddl } of COLUMN_MIGRATIONS) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+    if (!cols.some((c) => c.name === column)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`)
+    }
+  }
+}
+
+/**
  * Opens (creating if absent) the facilitator SQLite database at `path`, or an
  * in-memory database for `':memory:'`. Schema application is idempotent —
- * every DDL statement in schema.sql is `IF NOT EXISTS`, so this is safe to
- * call on every process start against an existing file.
+ * every DDL statement in schema.sql is `IF NOT EXISTS`, and additive column
+ * changes to existing tables run through `applyColumnMigrations` — so this is
+ * safe to call on every process start against an existing file.
  */
 export function openDb(path: string): Database.Database {
   const db = new Database(path)
@@ -20,6 +44,7 @@ export function openDb(path: string): Database.Database {
   db.pragma('busy_timeout = 5000')
   db.pragma('foreign_keys = ON')
   db.exec(SCHEMA_SQL)
+  applyColumnMigrations(db)
   return db
 }
 

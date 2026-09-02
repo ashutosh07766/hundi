@@ -182,6 +182,54 @@ describe('buildSignedIntent — spending policy', () => {
   })
 })
 
+describe('buildSignedIntent — goal_keywords (intent-binding)', () => {
+  it('signs goal_keywords into the intent — the signature covers them, not just storage', async () => {
+    const human = generateKeypair()
+    const { intent, credential } = await buildSignedIntent(
+      {
+        goal: 'buy running shoes',
+        ceilingPaise: 200_000,
+        approvalThresholdPaise: 200_000,
+        merchants: ['merchant-1'],
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        agentPubkeyHex: AGENT_PUBKEY,
+        goalKeywords: ['running shoe', 'sneaker'],
+      },
+      ed25519Signer(human),
+      ed25519Credential(human),
+    )
+
+    expect(intent.goal_keywords).toEqual(['running shoe', 'sneaker'])
+
+    // The signature verifies over the intent AS SIGNED, which includes goal_keywords.
+    const bytes = intentSigningBytes(intent)
+    expect(verifyMandateSignature(bytes, intent.sig, credential)).toBe(true)
+
+    // Tampering with the list after signing must invalidate the signature — proof the
+    // signed bytes actually depend on goal_keywords, not just that it sits alongside a
+    // signature over something else.
+    const tampered = intentSigningBytes({ ...intent, goal_keywords: ['blender'] })
+    expect(verifyMandateSignature(tampered, intent.sig, credential)).toBe(false)
+  })
+
+  it('omits goal_keywords entirely (not undefined-valued) when the ceremony sets none — byte-compat', async () => {
+    const human = generateKeypair()
+    const { intent } = await buildSignedIntent(
+      {
+        goal: 'Restock snacks',
+        ceilingPaise: 200000,
+        approvalThresholdPaise: 50000,
+        merchants: ['merchant-1'],
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        agentPubkeyHex: AGENT_PUBKEY,
+      },
+      ed25519Signer(human),
+      ed25519Credential(human),
+    )
+    expect('goal_keywords' in intent).toBe(false)
+  })
+})
+
 describe('ceremonyInputFromProposal', () => {
   const proposal: MandateProposalForIntent = {
     goal: 'shop Frido',
@@ -231,6 +279,16 @@ describe('ceremonyInputFromProposal', () => {
     const input = ceremonyInputFromProposal(proposal)
     expect('perMerchantCeilingPaise' in input).toBe(false)
     expect('cumulativeApprovalThresholdPaise' in input).toBe(false)
+    expect('goalKeywords' in input).toBe(false)
+  })
+
+  it('carries goal_keywords through when the proposal sets it', () => {
+    const withGoal: MandateProposalForIntent = {
+      ...proposal,
+      goal_keywords: ['running shoe', 'sneaker'],
+    }
+    const input = ceremonyInputFromProposal(withGoal)
+    expect(input.goalKeywords).toEqual(['running shoe', 'sneaker'])
   })
 
   it('feeds buildSignedIntent to produce a mandate core.verifyMandateSignature accepts', async () => {

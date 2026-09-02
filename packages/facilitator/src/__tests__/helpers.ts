@@ -104,6 +104,7 @@ type AttemptOverrides = Partial<{
   state: string
   receipt: string
   provider_order_id: string
+  provider_payment_id: string
   /** Backdates `created_at` and `updated_at` — the sweep's attempt-staleness rule
    * keys off `created_at`. */
   agedAt: number
@@ -113,8 +114,8 @@ export function insertAttempt(db: Database.Database, overrides: AttemptOverrides
   const id = overrides.id ?? nextId('attempt')
   const settlementId = overrides.settlement_id ?? insertSettlement(db)
   db.prepare(
-    `INSERT INTO settlement_attempts (id, settlement_id, method, state, receipt, provider_order_id)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO settlement_attempts (id, settlement_id, method, state, receipt, provider_order_id, provider_payment_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     settlementId,
@@ -122,6 +123,7 @@ export function insertAttempt(db: Database.Database, overrides: AttemptOverrides
     overrides.state ?? 'initiated',
     overrides.receipt ?? nextId('receipt'),
     overrides.provider_order_id ?? null,
+    overrides.provider_payment_id ?? null,
   )
   if (overrides.agedAt !== undefined) {
     db.prepare('UPDATE settlement_attempts SET created_at = ?, updated_at = ? WHERE id = ?').run(

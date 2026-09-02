@@ -16,6 +16,7 @@ import { registerCeremonyTokenRoutes } from './routes/ceremony-tokens.js'
 import { registerMandateProposalRoutes } from './routes/mandate-proposals.js'
 import { registerMandateRoutes } from './routes/mandates.js'
 import { registerReadRoutes } from './routes/read.js'
+import { registerRefundRoutes } from './routes/refund.js'
 import { registerRevokeRoute } from './routes/revoke.js'
 import { registerSettlementRoutes } from './routes/settlements.js'
 import { registerStoreRoutes } from './routes/stores.js'
@@ -68,6 +69,7 @@ export function createApp(deps: AppDeps): Hono {
   registerMandateProposalRoutes(app, deps)
   registerVerifyRoute(app, deps)
   registerSettlementRoutes(app, deps)
+  registerRefundRoutes(app, deps)
   registerApprovalRoutes(app, deps)
   registerRevokeRoute(app, deps)
   registerAdminRoutes(app, deps)

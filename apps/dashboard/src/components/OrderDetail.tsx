@@ -1,6 +1,7 @@
 import type { IntentMandate } from '@hundi/core'
 import { useEffect, useState } from 'react'
-import { listMandates } from '../lib/api.js'
+import { useIdentity } from '../context/identity-context.js'
+import { listMandates, refundOrder } from '../lib/api.js'
 import { FACILITATOR_URL } from '../lib/config.js'
 import { formatPaise } from '../lib/format.js'
 import { describeLedgerEvent, eventTone } from '../lib/narration.js'
@@ -17,6 +18,12 @@ import {
 import { XCircleIcon } from './icons.js'
 
 type Props = { settlementId: string; onClose: () => void }
+
+type RefundState =
+  | { status: 'idle' }
+  | { status: 'pending' }
+  | { status: 'done'; refundId: string; amountPaise: number }
+  | { status: 'error'; message: string }
 
 type LoadState =
   | { status: 'loading' }
@@ -43,7 +50,9 @@ function stateTone(state: string): 'ok' | 'danger' | 'warn' {
  * `error` state.
  */
 export function OrderDetail({ settlementId, onClose }: Props) {
+  const { dashboardToken } = useIdentity()
   const [state, setState] = useState<LoadState>({ status: 'loading' })
+  const [refund, setRefund] = useState<RefundState>({ status: 'idle' })
 
   useEffect(() => {
     let cancelled = false
@@ -87,6 +96,23 @@ export function OrderDetail({ settlementId, onClose }: Props) {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose])
 
+  async function handleRefund() {
+    if (!dashboardToken) {
+      setRefund({
+        status: 'error',
+        message: 'Set the dashboard token in Settings before refunding.',
+      })
+      return
+    }
+    setRefund({ status: 'pending' })
+    try {
+      const result = await refundOrder(settlementId, dashboardToken)
+      setRefund({ status: 'done', refundId: result.refund_id, amountPaise: result.amount_paise })
+    } catch (err) {
+      setRefund({ status: 'error', message: err instanceof Error ? err.message : String(err) })
+    }
+  }
+
   return (
     <div className="modal-overlay">
       <div className="modal" role="dialog" aria-modal="true" aria-label="Order receipt">
@@ -96,13 +122,23 @@ export function OrderDetail({ settlementId, onClose }: Props) {
 
         {state.status === 'loading' && <p className="panel__empty">Loading receipt…</p>}
         {state.status === 'error' && <div className="banner banner--error">{state.message}</div>}
-        {state.status === 'ready' && <Receipt state={state} />}
+        {state.status === 'ready' && (
+          <Receipt state={state} refund={refund} onRefund={handleRefund} />
+        )}
       </div>
     </div>
   )
 }
 
-function Receipt({ state }: { state: Extract<LoadState, { status: 'ready' }> }) {
+function Receipt({
+  state,
+  refund,
+  onRefund,
+}: {
+  state: Extract<LoadState, { status: 'ready' }>
+  refund: RefundState
+  onRefund: () => void
+}) {
   const { detail, skuTitles, mandateIntent } = state
   const { settlement, attempts, ledger } = detail
   const cart = safeParseCart(settlement.cart_json)
@@ -189,6 +225,28 @@ function Receipt({ state }: { state: Extract<LoadState, { status: 'ready' }> }) 
           Real Razorpay TEST-mode payment. Look it up in the Razorpay Dashboard → Test mode →
           Transactions.
         </p>
+
+        {settlement.state === 'captured' && (
+          <div className="receipt__refund">
+            {refund.status !== 'done' && (
+              <button
+                type="button"
+                className="btn btn--danger btn--small"
+                disabled={refund.status === 'pending'}
+                onClick={onRefund}
+              >
+                {refund.status === 'pending' ? 'Refunding…' : 'Refund'}
+              </button>
+            )}
+            {refund.status === 'done' && (
+              <p className="status status--ok">
+                Refunded — {formatPaise(refund.amountPaise)} via refund{' '}
+                <code className="hash">{refund.refundId}</code>.
+              </p>
+            )}
+            {refund.status === 'error' && <p className="status status--error">{refund.message}</p>}
+          </div>
+        )}
       </section>
 
       <section className="receipt__section">

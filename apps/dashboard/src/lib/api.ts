@@ -176,6 +176,21 @@ export async function postRevoke(args: {
   return postJson('/revoke', args)
 }
 
+/** POST /settlements/:id/refund — dashboard-token-gated. A refund is a human
+ * action, never an agent tool (see packages/mcp-server's structural test) — this
+ * is the one place in the dashboard that issues one. Idempotent server-side: a
+ * retried call for an already-refunded settlement replays the same refund_id. */
+export async function refundOrder(
+  settlementId: string,
+  dashboardToken: string,
+): Promise<{ settlement_id: string; refund_id: string; amount_paise: number }> {
+  return postJson(
+    `/settlements/${encodeURIComponent(settlementId)}/refund`,
+    {},
+    { 'x-hundi-dashboard-token': dashboardToken },
+  )
+}
+
 export type MandateProposalStatus = 'pending' | 'consumed' | 'expired'
 
 export type MandateProposal = {

@@ -18,6 +18,7 @@ export type LedgerEventType =
   | 'payment_failed'
   | 'payment_link_issued'
   | 'anomaly_refund_issued'
+  | 'refund_issued'
   | 'webhook_received'
   | 'webhook_rejected'
   | 'reconciliation_flagged'

@@ -28,6 +28,7 @@ export type LedgerEventType =
   | 'payment_failed'
   | 'payment_link_issued'
   | 'anomaly_refund_issued'
+  | 'refund_issued'
   | 'webhook_received'
   | 'webhook_rejected'
   | 'reconciliation_flagged'
@@ -80,6 +81,7 @@ export function eventTone(eventType: LedgerEventType): 'success' | 'danger' | 'w
     case 'attempt_superseded':
     case 'payment_link_issued':
     case 'anomaly_refund_issued':
+    case 'refund_issued':
     case 'agent_decision':
       return 'warn'
     default:
@@ -135,6 +137,10 @@ export function describeLedgerEvent(eventType: LedgerEventType, payload: LedgerP
     case 'anomaly_refund_issued': {
       const paymentId = str(payload, 'payment_id')
       return `Anomaly refund issued for payment ${paymentId ?? 'unknown'} — money was captured outside an active settlement, so it was returned.`
+    }
+    case 'refund_issued': {
+      const refundId = str(payload, 'refund_id')
+      return `Refunded by the dashboard — refund ${refundId ?? 'unknown'} issued for this order.`
     }
     case 'webhook_received':
       return 'Webhook received from the payment provider.'

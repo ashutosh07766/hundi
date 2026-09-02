@@ -91,6 +91,12 @@ describe('describeLedgerEvent', () => {
     )
   })
 
+  it('narrates refund_issued with the refund id', () => {
+    expect(describeLedgerEvent('refund_issued', { refund_id: 'rfnd_abc123' })).toContain(
+      'rfnd_abc123',
+    )
+  })
+
   it('narrates webhook_received', () => {
     expect(describeLedgerEvent('webhook_received', {})).toMatch(/webhook received/i)
   })
@@ -132,6 +138,7 @@ describe('describeLedgerEvent', () => {
       'payment_failed',
       'payment_link_issued',
       'anomaly_refund_issued',
+      'refund_issued',
       'webhook_received',
       'webhook_rejected',
       'reconciliation_flagged',

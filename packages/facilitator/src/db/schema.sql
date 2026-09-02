@@ -189,7 +189,7 @@ CREATE TABLE IF NOT EXISTS ledger_events (
     'settlement_created',
     'attempt_initiated','attempt_superseded',
     'payment_captured','payment_failed','payment_link_issued',
-    'anomaly_refund_issued',
+    'anomaly_refund_issued','refund_issued',
     'webhook_received','webhook_rejected',
     'reconciliation_flagged',
     'agent_decision',

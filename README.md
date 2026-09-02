@@ -11,10 +11,147 @@ Built for Razorpay's AI Buildathon, Track 01: *"Every money action
 explainable, bounded and gated. Show the audit trail and one failure
 handled gracefully."*
 
+## What it does
+
+- **Human-signed spending mandates.** A human authorizes a scoped budget
+  once (store, ceiling, expiry). The agent holds a distinct key that can
+  sign carts but can never approve, revoke, or self-fund.
+- **A deterministic verify gate.** Every purchase clears the same checks
+  before money moves: signature, catalog price-match, ceiling, merchant
+  scope, expiry, revocation. Failures return an exact reason
+  (AMOUNT_EXCEEDS_CEILING, MERCHANT_NOT_IN_SCOPE, PRICE_MISMATCH, ...).
+- **Bounded hands-free spend.** Per-purchase and cumulative approval lines,
+  plus per-merchant sub-limits, so many small auto-buys still can't drain
+  the ceiling.
+- **Goal-locked mandates.** Optional goal_keywords bind a mandate to a
+  purpose; an off-goal item is rejected GOAL_MISMATCH.
+- **Human-in-the-loop approvals.** Anything over the threshold parks as
+  pending_approval and waits for a human-signed decision in the dashboard.
+- **Idempotency + graceful failure.** Retries replay instead of
+  double-charging; failed captures fall back to a payment link, and a
+  late stray capture is auto-refunded.
+- **Tamper-evident audit.** Every decision is one row in a hash-chained,
+  append-only ledger, verifiable from genesis with one command.
+- **Agent-native by an MCP server.** Claude (or any MCP client) shops
+  through tools that expose no payment capability at all — only
+  browse/search/propose-mandate/request-purchase/read-orders.
+
 See [`docs/rfc.md`](docs/rfc.md) for the mandate model and how this
 compares to AP2, ACP, x402, UCP, and Reserve Pay/UAP. See
 [`docs/architecture.md`](docs/architecture.md) for the state machines,
 the rejection matrix, and the failure-recovery design.
+
+## Quickstart (judge-runnable in 2 minutes)
+
+Two paths. The **offline path** needs no accounts and proves the whole
+envelope. The **live hero path** drives Claude Desktop against a real
+Razorpay TEST-mode capture.
+
+**Prerequisites:** Node 24, pnpm 10+. `pnpm install` once.
+
+### Path 1 - offline, no accounts (fastest)
+
+```bash
+pnpm install
+# Six-stage demo: purchase, refusal, human gate, prompt-injection caught,
+# failure -> retry -> fallback-link -> stray-capture refunded, revocation.
+pnpm --filter @hundi/demo demo
+```
+
+Runs the real facilitator code (verify gate, state machine, ledger)
+against an in-memory SQLite DB and a scripted Razorpay double - no
+network call, no keys.
+
+### Path 2 - live hero flow (Claude Desktop -> real TEST-mode capture)
+
+This is the demo in [`demo/recording-script.md`](demo/recording-script.md).
+It captures a **real Razorpay TEST-mode payment** (rzp_test_...). No live
+money is ever moved; the facilitator refuses anything but test keys.
+
+1. **Configure secrets** (one-time):
+
+   ```bash
+   cp .env.example .env
+   # Fill RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET / RAZORPAY_WEBHOOK_SECRET
+   # (test mode), and DASHBOARD_TOKEN / ADMIN_TOKEN to any strong random
+   # strings. Optionally set ONBOARD_TOKEN to let the agent scan a store.
+   ```
+
+2. **Boot the facilitator** (the only process that holds Razorpay keys;
+   binds 127.0.0.1:8790, reads ../../.env):
+
+   ```bash
+   pnpm --filter @hundi/facilitator serve
+   ```
+
+   If the checkout driver reports a missing browser on first capture,
+   install Playwright's Chromium once: `pnpm --filter @hundi/facilitator exec playwright install chromium`.
+
+3. **Boot the dashboard** (the human console, Vite on :5173):
+
+   ```bash
+   pnpm --filter @hundi/dashboard dev
+   ```
+
+   Open http://localhost:5173 and paste your DASHBOARD_TOKEN (same value
+   as .env) into the dashboard's settings field.
+
+4. **Build the MCP server** and point Claude Desktop at the built entry:
+
+   ```bash
+   pnpm --filter @hundi/mcp-server build   # -> packages/mcp-server/dist/index.js
+   ```
+
+   Add to Claude Desktop's config
+   (`~/Library/Application Support/Claude/claude_desktop_config.json` on
+   macOS), using the **absolute** path to this repo:
+
+   ```json
+   {
+     "mcpServers": {
+       "hundi": {
+         "command": "node",
+         "args": ["/ABSOLUTE/PATH/TO/hundi/packages/mcp-server/dist/index.js"],
+         "env": {
+           "HUNDI_FACILITATOR_URL": "http://127.0.0.1:8790"
+         }
+       }
+     }
+   }
+   ```
+
+   `HUNDI_FACILITATOR_URL` defaults to `http://127.0.0.1:8790` if omitted.
+   Set `HUNDI_ONBOARD_TOKEN` to your `.env` `ONBOARD_TOKEN` only if you
+   want the agent to onboard stores itself. Restart Claude Desktop; the
+   `hundi` server should show connected.
+
+5. **Run the hero flow in Claude Desktop.** In the dashboard Stores tab,
+   confirm `myfrido-com` is onboarded (if not, ask the agent to
+   `onboard_store` `https://myfrido.com`). Then, in Claude Desktop:
+
+   - "What's your Hundi shopping identity, and what can you spend?"
+     -> `get_agent_identity`
+   - "Propose a mandate for myfrido-com: a Rs 5,000 budget to shop Frido,
+     hands-free." -> `prepare_mandate` returns a one-tap approve link
+   - Open the link, tap **Approve** in the dashboard (human signature).
+   - "Buy me the Frido leather sneakers, size 11UK." -> `search_products`
+     then `request_purchase` -> captured with a real Razorpay `payment_id`.
+   - "What have you bought me?" -> `list_orders`.
+
+6. **Verify the audit trail:**
+
+   ```bash
+   pnpm --filter @hundi/facilitator verify-ledger hundi.db
+   ```
+
+The full shot-by-shot narration is in
+[`demo/recording-script.md`](demo/recording-script.md); the 60-90s trust
+reel is in [`demo/trust-demo-choreography.md`](demo/trust-demo-choreography.md).
+
+> **Note for judges:** everything runs in Razorpay TEST MODE only - real
+> orders are never placed at the merchant, and only test-mode payments are
+> captured. Any GitHub-account / push caveat you may see elsewhere is a
+> maintainer workflow detail and is not relevant to running or judging this.
 
 ## Quickstart (<10 minutes, no external accounts required)
 

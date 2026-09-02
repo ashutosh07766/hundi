@@ -174,10 +174,10 @@ CREATE TABLE IF NOT EXISTS mandate_proposals (
   -- object by the route layer, never queried by key.
   per_merchant_ceiling_json TEXT,
   cumulative_approval_threshold_paise INTEGER,
-  -- Optional purpose restriction, mirroring IntentMandate's own goal_keywords (see
+  -- Optional purpose restriction, mirroring IntentMandate's own allowed_skus (see
   -- core/mandate.ts). Stores JSON.stringify(string[]); read back into an array by
   -- the route layer, never queried by value.
-  goal_keywords_json TEXT
+  allowed_skus_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS ledger_events (

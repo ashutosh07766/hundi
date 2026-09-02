@@ -1,11 +1,16 @@
-import type { CanonicalValue } from '@hundi/core'
+import type { CanonicalValue, IntentMandate } from '@hundi/core'
 import { canonicalJson, sha256Hex } from '@hundi/core'
 import { describe, expect, it } from 'vitest'
-import type { FeedProduct } from '../feed-product.js'
 import { transitionSettlement } from '../state-machine.js'
-import { upsertStoreCatalog } from '../store-catalog-repo.js'
 import { credentialFor, makeCart, makeIntent } from './fixtures.js'
-import { getJson, makeTestApp, postJson, registerMandate, TEST_ENV } from './http-helpers.js'
+import {
+  getJson,
+  makeTestApp,
+  mintCeremonyToken,
+  postJson,
+  registerMandate,
+  TEST_ENV,
+} from './http-helpers.js'
 
 describe('POST /settlements — unregistered mandate', () => {
   it('rejects with MANDATE_UNKNOWN when the intent was never registered', async () => {
@@ -460,102 +465,80 @@ describe('POST /settlements — per-merchant sub-ceiling', () => {
   })
 })
 
-describe('POST /settlements — goal-bound mandate (intent-binding)', () => {
-  function feedProduct(overrides: Partial<FeedProduct> = {}): FeedProduct {
-    return {
-      id: 'sku-1',
-      title: 'Generic Product',
-      description: 'A generic product.',
-      price_paise: 100_000,
-      currency: 'INR',
-      availability: { status: 'in_stock' },
-      image: 'https://example.com/img.jpg',
-      brand: 'Generic Brand',
-      merchant_id: 'merchant-1',
-      ...overrides,
-    }
-  }
-
-  it('rejects an off-goal cart GOAL_MISMATCH while an on-goal cart passes, against the same mandate + catalog', async () => {
-    const { app, db } = makeTestApp()
-    const { intent, agent } = makeIntent({
-      overrides: { goal_keywords: ['running shoe', 'sneaker'] },
-    })
+describe('POST /settlements — sku-bound mandate (intent-binding)', () => {
+  it('rejects an off-list cart GOAL_MISMATCH while an on-list cart passes, against the same mandate + catalog', async () => {
+    const { app } = makeTestApp()
+    const { intent, agent } = makeIntent({ overrides: { allowed_skus: ['sku-1'] } })
     await registerMandate(app, intent, credentialFor(agent))
 
-    upsertStoreCatalog(db, {
-      merchantId: 'merchant-1',
-      name: 'Merchant One',
-      sourceUrl: null,
-      products: [
-        feedProduct({
-          id: 'sku-shoe',
-          title: 'Velocity Air Running Shoe',
-          brand: 'Velocity Run',
-          description: 'Lightweight everyday trainer.',
-        }),
-        feedProduct({
-          id: 'sku-blender',
-          title: 'PowerBlend 900 Countertop Blender',
-          brand: 'PowerBlend',
-          description: 'A 900W countertop blender for smoothies.',
-        }),
-      ],
-    })
+    // Both skus priced in the merchant catalog so PRICE_MISMATCH can't fire first —
+    // isolates the GOAL_MISMATCH gate this test is asserting on.
+    const adminRes = await postJson(
+      app,
+      '/admin/merchants',
+      {
+        merchant_id: 'merchant-1',
+        name: 'Merchant One',
+        config: { catalogPrices: { 'sku-1': 100_000, 'sku-2': 100_000 } },
+      },
+      { 'x-hundi-admin-token': TEST_ENV.ADMIN_TOKEN },
+    )
+    expect(adminRes.status).toBe(201)
 
-    const blenderCart = makeCart({
+    const offListCart = makeCart({
       agent,
       intent,
-      items: [{ sku: 'sku-blender', qty: 1, unit_price_paise: 100_000 }],
-      overrides: { cartId: 'goal-blender-cart' },
+      items: [{ sku: 'sku-2', qty: 1, unit_price_paise: 100_000 }],
+      overrides: { cartId: 'goal-off-list-cart' },
     })
-    const blenderRes = await postJson(
+    const offListRes = await postJson(
       app,
       '/settlements',
-      { intent, cart: blenderCart },
-      { 'Idempotency-Key': 'idem-goal-blender' },
+      { intent, cart: offListCart },
+      { 'Idempotency-Key': 'idem-goal-off-list' },
     )
-    expect(blenderRes.status).toBe(202)
-    expect(await blenderRes.json()).toMatchObject({
+    expect(offListRes.status).toBe(202)
+    expect(await offListRes.json()).toMatchObject({
       ok: true,
       state: 'rejected',
       reason: 'GOAL_MISMATCH',
     })
 
-    const shoeCart = makeCart({
+    const onListCart = makeCart({
       agent,
       intent,
-      items: [{ sku: 'sku-shoe', qty: 1, unit_price_paise: 100_000 }],
-      overrides: { cartId: 'goal-shoe-cart' },
+      items: [{ sku: 'sku-1', qty: 1, unit_price_paise: 100_000 }],
+      overrides: { cartId: 'goal-on-list-cart' },
     })
-    const shoeRes = await postJson(
+    const onListRes = await postJson(
       app,
       '/settlements',
-      { intent, cart: shoeCart },
-      { 'Idempotency-Key': 'idem-goal-shoe' },
+      { intent, cart: onListCart },
+      { 'Idempotency-Key': 'idem-goal-on-list' },
     )
-    expect(shoeRes.status).toBe(202)
-    expect(await shoeRes.json()).not.toMatchObject({ state: 'rejected', reason: 'GOAL_MISMATCH' })
+    expect(onListRes.status).toBe(202)
+    expect(await onListRes.json()).not.toMatchObject({
+      state: 'rejected',
+      reason: 'GOAL_MISMATCH',
+    })
   })
 
-  it('GOAL_MISMATCH: fails closed when the sku is not in the merchant catalog at all', async () => {
+  it('registration rejects SIG_INVALID_INTENT when allowed_skus is stripped after signing (downgrade resistance)', async () => {
     const { app } = makeTestApp()
-    const { intent, agent } = makeIntent({ overrides: { goal_keywords: ['running shoe'] } })
-    await registerMandate(app, intent, credentialFor(agent))
-    // No store_catalogs row registered for merchant-1 at all — every sku is unresolvable.
+    const { intent, agent } = makeIntent({ overrides: { allowed_skus: ['sku-1'] } })
+    // An attacker (or a buggy client) strips the signed restriction before it ever
+    // reaches the facilitator — registration must catch this the same way it catches
+    // any other tampered intent, not silently accept an "unconstrained" mandate.
+    const downgraded = { ...intent } as Partial<IntentMandate>
+    delete downgraded.allowed_skus
 
-    const cart = makeCart({ agent, intent, overrides: { cartId: 'goal-no-catalog-cart' } })
-    const res = await postJson(
-      app,
-      '/settlements',
-      { intent, cart },
-      { 'Idempotency-Key': 'idem-goal-no-catalog' },
-    )
-    expect(res.status).toBe(202)
-    expect(await res.json()).toMatchObject({
-      ok: true,
-      state: 'rejected',
-      reason: 'GOAL_MISMATCH',
+    const ceremonyToken = await mintCeremonyToken(app)
+    const res = await postJson(app, '/mandates', {
+      intent: downgraded,
+      credential: credentialFor(agent),
+      ceremonyToken,
     })
+    expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({ ok: false, error: 'SIG_INVALID_INTENT' })
   })
 })

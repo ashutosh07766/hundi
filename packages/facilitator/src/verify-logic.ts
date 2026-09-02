@@ -9,14 +9,12 @@
 import type { CartMandate, IntentMandate, VerifyCtx } from '@hundi/core'
 import { canonicalJson, cartSigningBytes, intentSigningBytes, sha256Hex } from '@hundi/core'
 import type Database from 'better-sqlite3'
-import type { FeedProduct } from './feed-product.js'
 import {
   credentialFromRow,
   getCapturedSpend,
   getCapturedSpendAtMerchant,
   getMandateRow,
 } from './mandate-repo.js'
-import { getStoreCatalog } from './store-catalog-repo.js'
 
 /**
  * Content-addressed identifier for one intent+cart pairing. Pure — computed
@@ -28,33 +26,6 @@ export function computeMandateCartHash(intent: IntentMandate, cart: CartMandate)
   const intentHashHex = sha256Hex(intentSigningBytes(intent))
   const cartHashHex = sha256Hex(cartSigningBytes(cart))
   return sha256Hex(canonicalJson({ intent_hash: intentHashHex, cart_hash: cartHashHex }))
-}
-
-/** Resolves the per-sku searchable text (title + brand + description, lowercased) the
- * core `verifyChain` goal-binding check needs — only when the intent actually carries
- * `goal_keywords`, since most mandates don't and shouldn't pay for the catalog read.
- * A sku absent from the merchant's catalog gets no entry, which is what makes
- * `verifyChain` fail closed on it (see core/verify.ts). */
-function resolveItemGoalTexts(
-  db: Database.Database,
-  intent: IntentMandate,
-  cart: CartMandate,
-): Record<string, string> | undefined {
-  if (!intent.goal_keywords || intent.goal_keywords.length === 0) return undefined
-
-  const catalogRow = getStoreCatalog(db, cart.merchant_id)
-  const products = catalogRow ? (JSON.parse(catalogRow.catalog_json) as FeedProduct[]) : []
-  const bySku = new Map(products.map((p) => [p.id, p]))
-
-  const itemGoalTexts: Record<string, string> = {}
-  for (const item of cart.items) {
-    const product = bySku.get(item.sku)
-    if (product) {
-      itemGoalTexts[item.sku] =
-        `${product.title} ${product.brand} ${product.description}`.toLowerCase()
-    }
-  }
-  return itemGoalTexts
 }
 
 export type BuildVerifyCtxOptions = {
@@ -95,8 +66,6 @@ export function buildVerifyCtx(
       ? getCapturedSpendAtMerchant(db, intent.mandateId, cart.merchant_id)
       : undefined
 
-  const itemGoalTexts = resolveItemGoalTexts(db, intent, cart)
-
   const mandateCartHashHex = computeMandateCartHash(intent, cart)
 
   const dupRow = opts.excludeSettlementId
@@ -133,7 +102,6 @@ export function buildVerifyCtx(
     ...(merchantSpentPaise !== undefined ? { merchantSpentPaise } : {}),
     ...(credential ? { credential } : {}),
     ...(catalogPrices ? { catalogPrices } : {}),
-    ...(itemGoalTexts ? { itemGoalTexts } : {}),
   }
 
   return { ctx, mandateCartHashHex }

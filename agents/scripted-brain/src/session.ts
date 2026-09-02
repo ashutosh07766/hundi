@@ -34,6 +34,12 @@ export type RegisterMandateArgs = {
   /** Reuses an existing human identity (the intent/approval/revoke signer)
    * instead of minting a fresh one. */
   human?: AgentKeypair
+  /** Optional signed spending policy — carried into the intent (and thus the
+   * human's signature) only when set, matching intentSigningBytes' byte-compat
+   * convention. */
+  per_merchant_ceiling_paise?: Record<string, number>
+  cumulative_approval_threshold_paise?: number
+  allowed_skus?: string[]
 }
 
 export type RegisteredMandate = {
@@ -71,6 +77,13 @@ export async function registerMandate(args: RegisterMandateArgs): Promise<Regist
     merchants: args.merchants,
     expires_at: args.expires_at,
     agent_pubkey_hex: agent.publicKeyHex,
+    ...(args.per_merchant_ceiling_paise
+      ? { per_merchant_ceiling_paise: args.per_merchant_ceiling_paise }
+      : {}),
+    ...(args.cumulative_approval_threshold_paise !== undefined
+      ? { cumulative_approval_threshold_paise: args.cumulative_approval_threshold_paise }
+      : {}),
+    ...(args.allowed_skus ? { allowed_skus: args.allowed_skus } : {}),
   }
   const sig = signPayload(human.privateKey, intentSigningBytes(unsigned))
   const intent: IntentMandate = { ...unsigned, sig }

@@ -173,6 +173,45 @@ describe('prepare_mandate', () => {
     expect('cumulative_approval_threshold_paise' in call).toBe(false)
   })
 
+  it('forwards goal_keywords to the facilitator proposal unchanged and reflects it in terms', async () => {
+    const state = makeFakeFacilitatorState({})
+    const { server } = buildServer(state)
+    const client = await connectedClient(server)
+
+    const result = await client.callTool({
+      name: 'prepare_mandate',
+      arguments: {
+        merchant_id: 'demo-store-1',
+        goal: 'buy running shoes',
+        ceiling_rupees: 5000,
+        goal_keywords: ['running shoe', 'sneaker'],
+      },
+    })
+    expect(result.isError).toBeFalsy()
+
+    const body = jsonOf<{ terms: { goal_keywords?: string[] } }>(result)
+    expect(body.terms.goal_keywords).toEqual(['running shoe', 'sneaker'])
+
+    const call = state.proposeMandateCalls[0]
+    if (!call) throw new Error('expected a POST /mandates/propose call to have been recorded')
+    expect(call.goal_keywords).toEqual(['running shoe', 'sneaker'])
+  })
+
+  it('omits goal_keywords entirely from the facilitator call when the caller sets none', async () => {
+    const state = makeFakeFacilitatorState({})
+    const { server } = buildServer(state)
+    const client = await connectedClient(server)
+
+    await client.callTool({
+      name: 'prepare_mandate',
+      arguments: { merchant_id: 'demo-store-1', goal: 'shop Frido', ceiling_rupees: 5000 },
+    })
+
+    const call = state.proposeMandateCalls[0]
+    if (!call) throw new Error('expected a POST /mandates/propose call to have been recorded')
+    expect('goal_keywords' in call).toBe(false)
+  })
+
   it('surfaces a facilitator rejection (e.g. unknown merchant) as a clean tool error', async () => {
     const state = makeFakeFacilitatorState({
       onProposeMandate: () => ({

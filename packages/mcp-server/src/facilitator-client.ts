@@ -68,6 +68,10 @@ export type ProposeMandateArgs = {
    * pass an empty object — when the caller didn't ask for a split. */
   perMerchantCeilingPaise?: Record<string, number> | undefined
   cumulativeApprovalThresholdPaise?: number | undefined
+  /** Optional purpose restriction, mirroring IntentMandate's own `goal_keywords`
+   * (see @hundi/core's mandate.ts). Omit entirely — never pass an empty array —
+   * when the caller didn't ask to scope the mandate by keyword. */
+  goalKeywords?: string[] | undefined
 }
 
 export type ProposeMandateResult = {
@@ -260,6 +264,7 @@ export function createFacilitatorClient(
           ...(args.cumulativeApprovalThresholdPaise !== undefined
             ? { cumulative_approval_threshold_paise: args.cumulativeApprovalThresholdPaise }
             : {}),
+          ...(args.goalKeywords ? { goal_keywords: args.goalKeywords } : {}),
         }),
       })
       const body = (await parseJson(res, path)) as Envelope & {

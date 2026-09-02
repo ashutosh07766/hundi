@@ -28,6 +28,7 @@ import {
   insertMandateProposal,
   listMandateProposals,
   type MandateProposalRow,
+  parseGoalKeywords,
   parsePerMerchantCeiling,
 } from '../mandate-proposal-repo.js'
 import { requireHeaderToken } from '../middleware.js'
@@ -57,6 +58,7 @@ function summarize(row: MandateProposalRow): string {
 
 function toResponseRow(row: MandateProposalRow, nowSeconds: number) {
   const perMerchantCeilingPaise = parsePerMerchantCeiling(row)
+  const goalKeywords = parseGoalKeywords(row)
   return {
     id: row.id,
     merchant_id: row.merchant_id,
@@ -76,6 +78,7 @@ function toResponseRow(row: MandateProposalRow, nowSeconds: number) {
     ...(row.cumulative_approval_threshold_paise !== null
       ? { cumulative_approval_threshold_paise: row.cumulative_approval_threshold_paise }
       : {}),
+    ...(goalKeywords ? { goal_keywords: goalKeywords } : {}),
   }
 }
 
@@ -110,6 +113,7 @@ export function registerMandateProposalRoutes(app: Hono, { db, env }: AppDeps): 
       ...(body.cumulative_approval_threshold_paise !== undefined
         ? { cumulativeApprovalThresholdPaise: body.cumulative_approval_threshold_paise }
         : {}),
+      ...(body.goal_keywords ? { goalKeywords: body.goal_keywords } : {}),
     })
 
     const dashboardUrl = (env.DASHBOARD_URL ?? 'http://localhost:5173').replace(/\/$/, '')

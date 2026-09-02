@@ -173,7 +173,11 @@ CREATE TABLE IF NOT EXISTS mandate_proposals (
   -- paise>) — SQLite has no native map column, and this is read back into an
   -- object by the route layer, never queried by key.
   per_merchant_ceiling_json TEXT,
-  cumulative_approval_threshold_paise INTEGER
+  cumulative_approval_threshold_paise INTEGER,
+  -- Optional purpose restriction, mirroring IntentMandate's own goal_keywords (see
+  -- core/mandate.ts). Stores JSON.stringify(string[]); read back into an array by
+  -- the route layer, never queried by value.
+  goal_keywords_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS ledger_events (

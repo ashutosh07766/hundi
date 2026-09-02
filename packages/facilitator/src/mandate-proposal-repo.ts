@@ -28,6 +28,10 @@ export type MandateProposalRow = {
    * `parsePerMerchantCeiling`; nothing reads this column directly by key. */
   per_merchant_ceiling_json: string | null
   cumulative_approval_threshold_paise: number | null
+  /** Raw stored column — JSON.stringify of a `string[]`, or `null` when the proposal
+   * carries no purpose restriction. Callers reconstruct the array via
+   * `parseGoalKeywords`. */
+  goal_keywords_json: string | null
 }
 
 export type InsertMandateProposalArgs = {
@@ -41,6 +45,7 @@ export type InsertMandateProposalArgs = {
   expiresAt: number
   perMerchantCeilingPaise?: Record<string, number> | undefined
   cumulativeApprovalThresholdPaise?: number | undefined
+  goalKeywords?: string[] | undefined
 }
 
 export function insertMandateProposal(
@@ -50,8 +55,8 @@ export function insertMandateProposal(
   db.prepare(
     `INSERT INTO mandate_proposals
        (id, merchant_id, goal, ceiling_paise, approval_threshold_paise, currency, agent_pubkey_hex,
-        expires_at, per_merchant_ceiling_json, cumulative_approval_threshold_paise)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        expires_at, per_merchant_ceiling_json, cumulative_approval_threshold_paise, goal_keywords_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     args.id,
     args.merchantId,
@@ -63,6 +68,7 @@ export function insertMandateProposal(
     args.expiresAt,
     args.perMerchantCeilingPaise ? JSON.stringify(args.perMerchantCeilingPaise) : null,
     args.cumulativeApprovalThresholdPaise ?? null,
+    args.goalKeywords ? JSON.stringify(args.goalKeywords) : null,
   )
 }
 
@@ -74,6 +80,17 @@ export function parsePerMerchantCeiling(
 ): Record<string, number> | undefined {
   if (!row.per_merchant_ceiling_json) return undefined
   return JSON.parse(row.per_merchant_ceiling_json) as Record<string, number>
+}
+
+/** Reconstructs the goal-keyword list from its stored JSON column. Returns
+ * `undefined` (never `null`) for an absent restriction, matching `IntentMandate`'s
+ * own "absent entirely" convention for optional fields under
+ * exactOptionalPropertyTypes. */
+export function parseGoalKeywords(
+  row: Pick<MandateProposalRow, 'goal_keywords_json'>,
+): string[] | undefined {
+  if (!row.goal_keywords_json) return undefined
+  return JSON.parse(row.goal_keywords_json) as string[]
 }
 
 export function getMandateProposal(

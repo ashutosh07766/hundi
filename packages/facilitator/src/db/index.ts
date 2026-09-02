@@ -17,6 +17,7 @@ const SCHEMA_SQL = readFileSync(SCHEMA_PATH, 'utf8')
 const COLUMN_MIGRATIONS: readonly { table: string; column: string; ddl: string }[] = [
   { table: 'mandate_proposals', column: 'per_merchant_ceiling_json', ddl: 'TEXT' },
   { table: 'mandate_proposals', column: 'cumulative_approval_threshold_paise', ddl: 'INTEGER' },
+  { table: 'mandate_proposals', column: 'goal_keywords_json', ddl: 'TEXT' },
 ]
 
 function applyColumnMigrations(db: Database.Database): void {

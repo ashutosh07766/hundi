@@ -173,7 +173,7 @@ describe('prepare_mandate', () => {
     expect('cumulative_approval_threshold_paise' in call).toBe(false)
   })
 
-  it('forwards goal_keywords to the facilitator proposal unchanged and reflects it in terms', async () => {
+  it('forwards allowed_skus to the facilitator proposal unchanged and reflects it in terms', async () => {
     const state = makeFakeFacilitatorState({})
     const { server } = buildServer(state)
     const client = await connectedClient(server)
@@ -184,20 +184,20 @@ describe('prepare_mandate', () => {
         merchant_id: 'demo-store-1',
         goal: 'buy running shoes',
         ceiling_rupees: 5000,
-        goal_keywords: ['running shoe', 'sneaker'],
+        allowed_skus: ['sku-shoe-1', 'sku-shoe-2'],
       },
     })
     expect(result.isError).toBeFalsy()
 
-    const body = jsonOf<{ terms: { goal_keywords?: string[] } }>(result)
-    expect(body.terms.goal_keywords).toEqual(['running shoe', 'sneaker'])
+    const body = jsonOf<{ terms: { allowed_skus?: string[] } }>(result)
+    expect(body.terms.allowed_skus).toEqual(['sku-shoe-1', 'sku-shoe-2'])
 
     const call = state.proposeMandateCalls[0]
     if (!call) throw new Error('expected a POST /mandates/propose call to have been recorded')
-    expect(call.goal_keywords).toEqual(['running shoe', 'sneaker'])
+    expect(call.allowed_skus).toEqual(['sku-shoe-1', 'sku-shoe-2'])
   })
 
-  it('omits goal_keywords entirely from the facilitator call when the caller sets none', async () => {
+  it('omits allowed_skus entirely from the facilitator call when the caller sets none', async () => {
     const state = makeFakeFacilitatorState({})
     const { server } = buildServer(state)
     const client = await connectedClient(server)
@@ -209,7 +209,7 @@ describe('prepare_mandate', () => {
 
     const call = state.proposeMandateCalls[0]
     if (!call) throw new Error('expected a POST /mandates/propose call to have been recorded')
-    expect('goal_keywords' in call).toBe(false)
+    expect('allowed_skus' in call).toBe(false)
   })
 
   it('surfaces a facilitator rejection (e.g. unknown merchant) as a clean tool error', async () => {

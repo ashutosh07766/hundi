@@ -50,9 +50,11 @@ export function registerPrepareMandateTool(
         'multi-store budget unevenly, and a cumulative approval line ' +
         '(cumulative_approval_threshold_rupees) that pauses for approval once TOTAL spend would ' +
         'cross it — closing the gap a per-purchase threshold alone leaves open, where many small ' +
-        'purchases can otherwise drain the whole ceiling hands-free. Can also restrict the mandate ' +
-        'to a stated purpose with goal_keywords, so a "running shoes" budget cannot quietly buy a ' +
-        'blender — any purchase whose product does not match a keyword is rejected.',
+        'purchases can otherwise drain the whole ceiling hands-free. Can also restrict this mandate ' +
+        "to an exact set of product SKUs with allowed_skus — resolve the user's intent (e.g. " +
+        '"running shoes") to concrete SKUs with search_products/search_catalog FIRST, then pass ' +
+        'them here. A purchase of any SKU not in this set is rejected GOAL_MISMATCH. The merchant ' +
+        'cannot expand this set — it is signed. Omit for an unrestricted budget.',
       inputSchema: {
         merchant_id: z
           .string()
@@ -93,14 +95,16 @@ export function registerPrepareMandateTool(
               'if that purchase is itself under approval_threshold_rupees. Set this when the user ' +
               'wants a running-total safety line, not just a per-purchase one.',
           ),
-        goal_keywords: z
+        allowed_skus: z
           .array(z.string().min(1))
           .min(1)
           .optional()
           .describe(
-            "Restrict this mandate to products matching these keywords — e.g. ['running shoe', " +
-              "'sneaker', 'trainer']. A purchase whose product doesn't match any keyword is " +
-              'rejected GOAL_MISMATCH. Omit for an unrestricted budget.',
+            "Restrict this mandate to an exact set of product SKUs — e.g. ['SKU-123', 'SKU-456']. " +
+              "Resolve the user's intent (e.g. 'running shoes') to concrete SKUs with " +
+              'search_products/search_catalog FIRST, then pass them here. A purchase of any SKU ' +
+              'not in this set is rejected GOAL_MISMATCH. The merchant cannot expand this set — ' +
+              'it is signed. Omit for an unrestricted budget.',
           ),
       },
     },
@@ -111,7 +115,7 @@ export function registerPrepareMandateTool(
       approval_threshold_rupees,
       per_merchant_ceiling_rupees,
       cumulative_approval_threshold_rupees,
-      goal_keywords,
+      allowed_skus,
     }) => {
       const ceilingPaise = rupeesToPaise(ceiling_rupees)
       const approvalThresholdPaise = rupeesToPaise(approval_threshold_rupees ?? ceiling_rupees)
@@ -138,7 +142,7 @@ export function registerPrepareMandateTool(
         ...(cumulativeApprovalThresholdPaise !== undefined
           ? { cumulativeApprovalThresholdPaise }
           : {}),
-        ...(goal_keywords ? { goalKeywords: goal_keywords } : {}),
+        ...(allowed_skus ? { allowedSkus: allowed_skus } : {}),
       })
 
       const handsFree = approvalThresholdPaise >= ceilingPaise
@@ -175,7 +179,7 @@ export function registerPrepareMandateTool(
                 ),
               }
             : {}),
-          ...(goal_keywords ? { goal_keywords } : {}),
+          ...(allowed_skus ? { allowed_skus, allowed_skus_count: allowed_skus.length } : {}),
         },
         instructions:
           `Give the user this one-tap link and ask them to open it and tap "Approve": ${approveUrl} ` +

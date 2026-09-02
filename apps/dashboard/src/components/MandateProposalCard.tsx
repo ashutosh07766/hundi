@@ -79,6 +79,19 @@ export function MandateProposalCard({ proposal, highlighted, onApproved }: Props
               : `Above ${formatPaise(proposal.approval_threshold_paise)}`}
           </dd>
         </div>
+        {proposal.per_merchant_ceiling_paise &&
+          Object.entries(proposal.per_merchant_ceiling_paise).map(([merchantId, paise]) => (
+            <div className="mandate-card__stat" key={merchantId}>
+              <dt>Max at {merchantId}</dt>
+              <dd>{formatPaise(paise)}</dd>
+            </div>
+          ))}
+        {proposal.cumulative_approval_threshold_paise !== undefined && (
+          <div className="mandate-card__stat">
+            <dt>Approval required above (cumulative)</dt>
+            <dd>{formatPaise(proposal.cumulative_approval_threshold_paise)}</dd>
+          </div>
+        )}
       </dl>
 
       <p className="proposal-card__disclosure">

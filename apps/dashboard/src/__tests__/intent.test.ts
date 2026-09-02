@@ -119,6 +119,69 @@ describe('buildSignedIntent', () => {
   })
 })
 
+describe('buildSignedIntent — spending policy', () => {
+  it('signs the policy fields into the intent — the signature covers them, not just storage', async () => {
+    const human = generateKeypair()
+    const { intent, credential } = await buildSignedIntent(
+      {
+        goal: 'shop across two stores',
+        ceilingPaise: 500_000,
+        approvalThresholdPaise: 500_000,
+        merchants: ['merchant-1', 'merchant-2'],
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        agentPubkeyHex: AGENT_PUBKEY,
+        perMerchantCeilingPaise: { 'merchant-1': 200_000 },
+        cumulativeApprovalThresholdPaise: 400_000,
+      },
+      ed25519Signer(human),
+      ed25519Credential(human),
+    )
+
+    // The built intent actually carries the policy, not just an intent to store it.
+    expect(intent.per_merchant_ceiling_paise).toEqual({ 'merchant-1': 200_000 })
+    expect(intent.cumulative_approval_threshold_paise).toBe(400_000)
+
+    // The signature verifies over the intent AS SIGNED, which includes the policy.
+    const bytes = intentSigningBytes(intent)
+    expect(verifyMandateSignature(bytes, intent.sig, credential)).toBe(true)
+
+    // Tampering with either policy field after signing must invalidate the
+    // signature — proof the bytes that were signed actually depend on the policy,
+    // not just that the policy happens to sit alongside a signature over something
+    // else. If intentSigningBytes ignored the policy, these two tampered variants
+    // would still verify.
+    const tamperedCeiling = intentSigningBytes({
+      ...intent,
+      per_merchant_ceiling_paise: { 'merchant-1': 999_999 },
+    })
+    expect(verifyMandateSignature(tamperedCeiling, intent.sig, credential)).toBe(false)
+
+    const tamperedCumulative = intentSigningBytes({
+      ...intent,
+      cumulative_approval_threshold_paise: 1,
+    })
+    expect(verifyMandateSignature(tamperedCumulative, intent.sig, credential)).toBe(false)
+  })
+
+  it('omits policy keys entirely (not undefined-valued) when the ceremony sets no policy — byte-compat with pre-policy mandates', async () => {
+    const human = generateKeypair()
+    const { intent } = await buildSignedIntent(
+      {
+        goal: 'Restock snacks',
+        ceilingPaise: 200000,
+        approvalThresholdPaise: 50000,
+        merchants: ['merchant-1'],
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        agentPubkeyHex: AGENT_PUBKEY,
+      },
+      ed25519Signer(human),
+      ed25519Credential(human),
+    )
+    expect('per_merchant_ceiling_paise' in intent).toBe(false)
+    expect('cumulative_approval_threshold_paise' in intent).toBe(false)
+  })
+})
+
 describe('ceremonyInputFromProposal', () => {
   const proposal: MandateProposalForIntent = {
     goal: 'shop Frido',
@@ -151,6 +214,23 @@ describe('ceremonyInputFromProposal', () => {
     const input = ceremonyInputFromProposal(proposal)
     expect(input.goal).toBe('shop Frido')
     expect(input.expiresAt).toBe(1_800_000_000)
+  })
+
+  it('carries the policy fields through when the proposal sets them', () => {
+    const withPolicy: MandateProposalForIntent = {
+      ...proposal,
+      per_merchant_ceiling_paise: { 'myfrido-com': 100_000 },
+      cumulative_approval_threshold_paise: 300_000,
+    }
+    const input = ceremonyInputFromProposal(withPolicy)
+    expect(input.perMerchantCeilingPaise).toEqual({ 'myfrido-com': 100_000 })
+    expect(input.cumulativeApprovalThresholdPaise).toBe(300_000)
+  })
+
+  it('omits the policy fields entirely when the proposal sets none', () => {
+    const input = ceremonyInputFromProposal(proposal)
+    expect('perMerchantCeilingPaise' in input).toBe(false)
+    expect('cumulativeApprovalThresholdPaise' in input).toBe(false)
   })
 
   it('feeds buildSignedIntent to produce a mandate core.verifyMandateSignature accepts', async () => {

@@ -31,6 +31,12 @@ export type CeremonyInput = {
    * agent and pasted into the ceremony; this is the key the intent attests as
    * the cart signer. Must NOT equal the human key. */
   agentPubkeyHex: string
+  /** Optional spending policy — see IntentMandate's own fields in @hundi/core's
+   * mandate.ts. Carried through as-is into the signed intent; omit entirely (never
+   * pass an empty object / explicit undefined) when the ceremony sets no policy, so
+   * `intentSigningBytes` produces the pre-policy byte shape. */
+  perMerchantCeilingPaise?: Record<string, number> | undefined
+  cumulativeApprovalThresholdPaise?: number | undefined
 }
 
 export type SignedCeremony = {
@@ -57,7 +63,22 @@ export async function buildSignedIntent(
     merchants: input.merchants,
     expires_at: input.expiresAt,
     agent_pubkey_hex: input.agentPubkeyHex,
+    // Conditional spread, not a plain field: an omitted key (rather than an
+    // explicit `undefined` value) is what keeps a policy-free ceremony's signing
+    // bytes byte-identical to the pre-policy shape — intentSigningBytes and every
+    // existing registered mandate depend on that.
+    ...(input.perMerchantCeilingPaise
+      ? { per_merchant_ceiling_paise: input.perMerchantCeilingPaise }
+      : {}),
+    ...(input.cumulativeApprovalThresholdPaise !== undefined
+      ? { cumulative_approval_threshold_paise: input.cumulativeApprovalThresholdPaise }
+      : {}),
   }
+  // The signature must cover the policy fields, not just store them — sign AFTER
+  // they're folded into `unsigned` so intentSigningBytes (which includes them when
+  // present) hashes the exact terms the human is approving. Signing without them
+  // and registering with them would make the facilitator recompute different bytes
+  // and reject with SIG_INVALID_INTENT.
   const sig = await sign(intentSigningBytes(unsigned))
   return { intent: { ...unsigned, sig }, credential }
 }
@@ -72,6 +93,8 @@ export type MandateProposalForIntent = {
   merchant_id: string
   agent_pubkey_hex: string
   expires_at: number
+  per_merchant_ceiling_paise?: Record<string, number> | undefined
+  cumulative_approval_threshold_paise?: number | undefined
 }
 
 /** Maps a facilitator mandate proposal directly onto `buildSignedIntent`'s paise-
@@ -88,6 +111,14 @@ export function ceremonyInputFromProposal(proposal: MandateProposalForIntent): C
     merchants: [proposal.merchant_id],
     expiresAt: proposal.expires_at,
     agentPubkeyHex: proposal.agent_pubkey_hex,
+    // Straight passthrough, same paise-denominated convention as the base terms
+    // above — proposals never carry a rupee-denominated policy to convert.
+    ...(proposal.per_merchant_ceiling_paise
+      ? { perMerchantCeilingPaise: proposal.per_merchant_ceiling_paise }
+      : {}),
+    ...(proposal.cumulative_approval_threshold_paise !== undefined
+      ? { cumulativeApprovalThresholdPaise: proposal.cumulative_approval_threshold_paise }
+      : {}),
   }
 }
 

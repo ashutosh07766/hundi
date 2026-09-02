@@ -191,6 +191,12 @@ export type MandateProposal = {
   created_at: number
   /** Server-composed human-readable one-liner — render as-is, don't reconstruct client-side. */
   summary: string
+  /** Optional spending policy — present only when the agent asked for one. See
+   * IntentMandate's own fields (@hundi/core's mandate.ts) for what these mean;
+   * the proposal carries them so the one-tap approval can sign them into the
+   * real mandate unchanged. */
+  per_merchant_ceiling_paise?: Record<string, number> | undefined
+  cumulative_approval_threshold_paise?: number | undefined
 }
 
 /** GET /mandates/proposals[?status=] — no dashboard token required; this is the same

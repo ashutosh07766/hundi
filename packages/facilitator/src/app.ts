@@ -11,6 +11,7 @@ import type { RazorpayClient } from './razorpay-client.js'
 import { registerAdminRoutes } from './routes/admin.js'
 import { registerAgentRoutes } from './routes/agent.js'
 import { registerApprovalRoutes } from './routes/approvals.js'
+import { registerCatalogSearchRoute } from './routes/catalog-search.js'
 import { registerCeremonyTokenRoutes } from './routes/ceremony-tokens.js'
 import { registerMandateProposalRoutes } from './routes/mandate-proposals.js'
 import { registerMandateRoutes } from './routes/mandates.js'
@@ -72,6 +73,10 @@ export function createApp(deps: AppDeps): Hono {
   registerAdminRoutes(app, deps)
   registerWebhookRoutes(app, deps)
   registerReadRoutes(app, deps)
+  // Must precede registerStoreRoutes — see catalog-search.ts's header comment on
+  // why the literal /catalog/search path has to win over the /catalog/:merchant_id
+  // param route it would otherwise collide with.
+  registerCatalogSearchRoute(app, deps)
   registerStoreRoutes(app, deps)
   registerAgentRoutes(app, deps)
 

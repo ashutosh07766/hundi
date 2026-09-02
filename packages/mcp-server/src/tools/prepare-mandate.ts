@@ -45,7 +45,12 @@ export function registerPrepareMandateTool(
         'just removes per-purchase pauses rather than the human step. Set ' +
         'approval_threshold_rupees below ceiling_rupees when the user wants purchases above a ' +
         "line to pause for their approval instead. Once the user confirms they've approved, call " +
-        'get_agent_identity to find the new mandate_id, then shop with request_purchase.',
+        'get_agent_identity to find the new mandate_id, then shop with request_purchase. Can also ' +
+        'set per-merchant sub-limits (per_merchant_ceiling_rupees) when the user wants to split a ' +
+        'multi-store budget unevenly, and a cumulative approval line ' +
+        '(cumulative_approval_threshold_rupees) that pauses for approval once TOTAL spend would ' +
+        'cross it — closing the gap a per-purchase threshold alone leaves open, where many small ' +
+        'purchases can otherwise drain the whole ceiling hands-free.',
       inputSchema: {
         merchant_id: z
           .string()
@@ -67,11 +72,49 @@ export function registerPrepareMandateTool(
               'can be spent hands-free in total: many separate purchases each under the threshold ' +
               'can still exhaust the whole ceiling with zero approvals.',
           ),
+        per_merchant_ceiling_rupees: z
+          .record(z.string().min(1), z.number().positive())
+          .optional()
+          .describe(
+            'Optional per-merchant sub-ceilings, in rupees, keyed by merchant_id. A merchant ' +
+              'listed here can never be spent above its own entry, on top of (and never above) the ' +
+              'global ceiling_rupees. A merchant not listed is bounded only by the global ceiling. ' +
+              'Use this for "no more than ₹X at store A" style splits within one mandate.',
+          ),
+        cumulative_approval_threshold_rupees: z
+          .number()
+          .positive()
+          .optional()
+          .describe(
+            'Optional cumulative approval line, in rupees. Once total captured spend under this ' +
+              'mandate WOULD cross this line, the next purchase pauses for human approval — even ' +
+              'if that purchase is itself under approval_threshold_rupees. Set this when the user ' +
+              'wants a running-total safety line, not just a per-purchase one.',
+          ),
       },
     },
-    async ({ merchant_id, goal, ceiling_rupees, approval_threshold_rupees }) => {
+    async ({
+      merchant_id,
+      goal,
+      ceiling_rupees,
+      approval_threshold_rupees,
+      per_merchant_ceiling_rupees,
+      cumulative_approval_threshold_rupees,
+    }) => {
       const ceilingPaise = rupeesToPaise(ceiling_rupees)
       const approvalThresholdPaise = rupeesToPaise(approval_threshold_rupees ?? ceiling_rupees)
+      const perMerchantCeilingPaise = per_merchant_ceiling_rupees
+        ? Object.fromEntries(
+            Object.entries(per_merchant_ceiling_rupees).map(([merchantId, rupees]) => [
+              merchantId,
+              rupeesToPaise(rupees),
+            ]),
+          )
+        : undefined
+      const cumulativeApprovalThresholdPaise =
+        cumulative_approval_threshold_rupees !== undefined
+          ? rupeesToPaise(cumulative_approval_threshold_rupees)
+          : undefined
 
       const { proposalId, approveUrl } = await deps.facilitatorClient.proposeMandate({
         merchantId: merchant_id,
@@ -79,6 +122,10 @@ export function registerPrepareMandateTool(
         ceilingPaise,
         approvalThresholdPaise,
         agentPubkeyHex: deps.agent.publicKeyHex,
+        ...(perMerchantCeilingPaise ? { perMerchantCeilingPaise } : {}),
+        ...(cumulativeApprovalThresholdPaise !== undefined
+          ? { cumulativeApprovalThresholdPaise }
+          : {}),
       })
 
       const handsFree = approvalThresholdPaise >= ceilingPaise
@@ -96,6 +143,25 @@ export function registerPrepareMandateTool(
           approvals: handsFree
             ? 'none — fully hands-free within the ceiling'
             : `required above ${formatRupees(approvalThresholdPaise)}`,
+          ...(perMerchantCeilingPaise
+            ? {
+                per_merchant_ceiling_paise: perMerchantCeilingPaise,
+                per_merchant_ceiling_display: Object.fromEntries(
+                  Object.entries(perMerchantCeilingPaise).map(([merchantId, paise]) => [
+                    merchantId,
+                    formatRupees(paise),
+                  ]),
+                ),
+              }
+            : {}),
+          ...(cumulativeApprovalThresholdPaise !== undefined
+            ? {
+                cumulative_approval_threshold_paise: cumulativeApprovalThresholdPaise,
+                cumulative_approval_threshold_display: formatRupees(
+                  cumulativeApprovalThresholdPaise,
+                ),
+              }
+            : {}),
         },
         instructions:
           `Give the user this one-tap link and ask them to open it and tap "Approve": ${approveUrl} ` +

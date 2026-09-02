@@ -49,6 +49,8 @@ export type ProposeMandateCall = {
   ceiling_paise: number
   approval_threshold_paise: number
   agent_pubkey_hex: string
+  per_merchant_ceiling_paise?: Record<string, number>
+  cumulative_approval_threshold_paise?: number
 }
 
 export type FakeFacilitatorState = {

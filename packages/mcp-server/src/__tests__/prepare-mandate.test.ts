@@ -119,6 +119,60 @@ describe('prepare_mandate', () => {
     expect(body.instructions).toContain('http://localhost:5173/?propose=proposal-1')
   })
 
+  it('converts per_merchant_ceiling_rupees and cumulative_approval_threshold_rupees to paise and forwards them', async () => {
+    const state = makeFakeFacilitatorState({})
+    const { server } = buildServer(state)
+    const client = await connectedClient(server)
+
+    const result = await client.callTool({
+      name: 'prepare_mandate',
+      arguments: {
+        merchant_id: 'demo-store-1',
+        goal: 'shop across two stores',
+        ceiling_rupees: 5000,
+        per_merchant_ceiling_rupees: { 'demo-store-1': 2000, 'demo-store-2': 1500 },
+        cumulative_approval_threshold_rupees: 4000,
+      },
+    })
+    expect(result.isError).toBeFalsy()
+
+    const body = jsonOf<{
+      terms: {
+        per_merchant_ceiling_paise?: Record<string, number>
+        cumulative_approval_threshold_paise?: number
+      }
+    }>(result)
+    expect(body.terms.per_merchant_ceiling_paise).toEqual({
+      'demo-store-1': 200_000,
+      'demo-store-2': 150_000,
+    })
+    expect(body.terms.cumulative_approval_threshold_paise).toBe(400_000)
+
+    const call = state.proposeMandateCalls[0]
+    if (!call) throw new Error('expected a POST /mandates/propose call to have been recorded')
+    expect(call.per_merchant_ceiling_paise).toEqual({
+      'demo-store-1': 200_000,
+      'demo-store-2': 150_000,
+    })
+    expect(call.cumulative_approval_threshold_paise).toBe(400_000)
+  })
+
+  it('omits the policy fields entirely from the facilitator call when the caller sets no policy', async () => {
+    const state = makeFakeFacilitatorState({})
+    const { server } = buildServer(state)
+    const client = await connectedClient(server)
+
+    await client.callTool({
+      name: 'prepare_mandate',
+      arguments: { merchant_id: 'demo-store-1', goal: 'shop Frido', ceiling_rupees: 5000 },
+    })
+
+    const call = state.proposeMandateCalls[0]
+    if (!call) throw new Error('expected a POST /mandates/propose call to have been recorded')
+    expect('per_merchant_ceiling_paise' in call).toBe(false)
+    expect('cumulative_approval_threshold_paise' in call).toBe(false)
+  })
+
   it('surfaces a facilitator rejection (e.g. unknown merchant) as a clean tool error', async () => {
     const state = makeFakeFacilitatorState({
       onProposeMandate: () => ({

@@ -63,6 +63,11 @@ export type ProposeMandateArgs = {
   ceilingPaise: number
   approvalThresholdPaise: number
   agentPubkeyHex: string
+  /** Optional per-merchant sub-ceilings (paise), mirroring IntentMandate's own
+   * optional policy fields (see @hundi/core's mandate.ts). Omit entirely — never
+   * pass an empty object — when the caller didn't ask for a split. */
+  perMerchantCeilingPaise?: Record<string, number> | undefined
+  cumulativeApprovalThresholdPaise?: number | undefined
 }
 
 export type ProposeMandateResult = {
@@ -249,6 +254,12 @@ export function createFacilitatorClient(
           ceiling_paise: args.ceilingPaise,
           approval_threshold_paise: args.approvalThresholdPaise,
           agent_pubkey_hex: args.agentPubkeyHex,
+          ...(args.perMerchantCeilingPaise
+            ? { per_merchant_ceiling_paise: args.perMerchantCeilingPaise }
+            : {}),
+          ...(args.cumulativeApprovalThresholdPaise !== undefined
+            ? { cumulative_approval_threshold_paise: args.cumulativeApprovalThresholdPaise }
+            : {}),
         }),
       })
       const body = (await parseJson(res, path)) as Envelope & {

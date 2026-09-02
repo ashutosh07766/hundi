@@ -166,7 +166,14 @@ CREATE TABLE IF NOT EXISTS mandate_proposals (
   agent_pubkey_hex TEXT NOT NULL,
   expires_at INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','consumed','expired')),
-  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  -- Optional spending policy, mirroring IntentMandate's own optional fields (see
+  -- core/mandate.ts). Nullable because most proposals carry only the base terms
+  -- above. per_merchant_ceiling_json stores JSON.stringify(Record<merchant_id,
+  -- paise>) — SQLite has no native map column, and this is read back into an
+  -- object by the route layer, never queried by key.
+  per_merchant_ceiling_json TEXT,
+  cumulative_approval_threshold_paise INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS ledger_events (

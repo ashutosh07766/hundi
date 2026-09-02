@@ -124,6 +124,14 @@ export const mandateProposeBodySchema = z.object({
   approval_threshold_paise: z.number().int().nonnegative(),
   agent_pubkey_hex: z.string().min(1),
   expires_at: z.number().int().positive().optional(),
+  // Mirrors IntentMandate's own optional policy fields (see core/mandate.ts) — a
+  // proposal is inert staging data, but its terms must be able to carry the same
+  // policy the eventual signed intent will, or approving it one-tap would silently
+  // drop the split the agent asked for.
+  per_merchant_ceiling_paise: z
+    .record(z.string().min(1), z.number().int().nonnegative())
+    .optional(),
+  cumulative_approval_threshold_paise: z.number().int().nonnegative().optional(),
 })
 
 export const adminMerchantBodySchema = z.object({

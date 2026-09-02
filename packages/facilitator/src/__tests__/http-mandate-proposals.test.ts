@@ -78,6 +78,63 @@ describe('POST /mandates/propose', () => {
   })
 })
 
+describe('POST /mandates/propose — spending policy', () => {
+  it('persists per_merchant_ceiling_paise and cumulative_approval_threshold_paise and returns them on GET', async () => {
+    const { app } = makeTestApp({
+      scanStore: async () => fakeScanResult({ merchant_id: 'example-com' }),
+    })
+    await onboardExampleStore(app)
+
+    const res = await postJson(
+      app,
+      '/mandates/propose',
+      proposeBody({
+        per_merchant_ceiling_paise: { 'example-com': 200_000 },
+        cumulative_approval_threshold_paise: 400_000,
+      }),
+    )
+    expect(res.status).toBe(201)
+    const { proposal_id } = (await res.json()) as { proposal_id: string }
+
+    const detail = await getJson(app, `/mandates/proposals/${proposal_id}`)
+    const json = (await detail.json()) as {
+      proposal: {
+        per_merchant_ceiling_paise?: Record<string, number>
+        cumulative_approval_threshold_paise?: number
+      }
+    }
+    expect(json.proposal.per_merchant_ceiling_paise).toEqual({ 'example-com': 200_000 })
+    expect(json.proposal.cumulative_approval_threshold_paise).toBe(400_000)
+
+    const list = await getJson(app, '/mandates/proposals')
+    const listJson = (await list.json()) as {
+      proposals: {
+        id: string
+        per_merchant_ceiling_paise?: Record<string, number>
+        cumulative_approval_threshold_paise?: number
+      }[]
+    }
+    const row = listJson.proposals.find((p) => p.id === proposal_id)
+    expect(row?.per_merchant_ceiling_paise).toEqual({ 'example-com': 200_000 })
+    expect(row?.cumulative_approval_threshold_paise).toBe(400_000)
+  })
+
+  it('omits the policy keys entirely (not null) when the proposal sets no policy', async () => {
+    const { app } = makeTestApp({
+      scanStore: async () => fakeScanResult({ merchant_id: 'example-com' }),
+    })
+    await onboardExampleStore(app)
+
+    const res = await postJson(app, '/mandates/propose', proposeBody())
+    const { proposal_id } = (await res.json()) as { proposal_id: string }
+
+    const detail = await getJson(app, `/mandates/proposals/${proposal_id}`)
+    const json = (await detail.json()) as { proposal: Record<string, unknown> }
+    expect('per_merchant_ceiling_paise' in json.proposal).toBe(false)
+    expect('cumulative_approval_threshold_paise' in json.proposal).toBe(false)
+  })
+})
+
 describe('GET /mandates/proposals', () => {
   it('lists proposals, filterable by status', async () => {
     const { app } = makeTestApp({

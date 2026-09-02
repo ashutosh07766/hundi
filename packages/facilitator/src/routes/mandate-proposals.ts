@@ -28,6 +28,7 @@ import {
   insertMandateProposal,
   listMandateProposals,
   type MandateProposalRow,
+  parsePerMerchantCeiling,
 } from '../mandate-proposal-repo.js'
 import { requireHeaderToken } from '../middleware.js'
 import { mandateProposeBodySchema } from '../schemas.js'
@@ -55,6 +56,7 @@ function summarize(row: MandateProposalRow): string {
 }
 
 function toResponseRow(row: MandateProposalRow, nowSeconds: number) {
+  const perMerchantCeilingPaise = parsePerMerchantCeiling(row)
   return {
     id: row.id,
     merchant_id: row.merchant_id,
@@ -67,6 +69,13 @@ function toResponseRow(row: MandateProposalRow, nowSeconds: number) {
     status: effectiveStatus(row, nowSeconds),
     created_at: row.created_at,
     summary: summarize(row),
+    // Included only when the proposal actually carries the policy — an absent key
+    // (not a null-valued one) is what lets a plain proposal's response shape stay
+    // identical to the pre-policy shape, matching the signed intent's own contract.
+    ...(perMerchantCeilingPaise ? { per_merchant_ceiling_paise: perMerchantCeilingPaise } : {}),
+    ...(row.cumulative_approval_threshold_paise !== null
+      ? { cumulative_approval_threshold_paise: row.cumulative_approval_threshold_paise }
+      : {}),
   }
 }
 
@@ -95,6 +104,12 @@ export function registerMandateProposalRoutes(app: Hono, { db, env }: AppDeps): 
       currency: 'INR',
       agentPubkeyHex: body.agent_pubkey_hex,
       expiresAt,
+      ...(body.per_merchant_ceiling_paise
+        ? { perMerchantCeilingPaise: body.per_merchant_ceiling_paise }
+        : {}),
+      ...(body.cumulative_approval_threshold_paise !== undefined
+        ? { cumulativeApprovalThresholdPaise: body.cumulative_approval_threshold_paise }
+        : {}),
     })
 
     const dashboardUrl = (env.DASHBOARD_URL ?? 'http://localhost:5173').replace(/\/$/, '')

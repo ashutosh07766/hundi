@@ -23,6 +23,11 @@ export type MandateProposalRow = {
   expires_at: number
   status: MandateProposalStatus
   created_at: number
+  /** Raw stored column — JSON.stringify of a `Record<merchant_id, paise>`, or `null`
+   * when the proposal carries no per-merchant split. Callers reconstruct the map via
+   * `parsePerMerchantCeiling`; nothing reads this column directly by key. */
+  per_merchant_ceiling_json: string | null
+  cumulative_approval_threshold_paise: number | null
 }
 
 export type InsertMandateProposalArgs = {
@@ -34,6 +39,8 @@ export type InsertMandateProposalArgs = {
   currency: string
   agentPubkeyHex: string
   expiresAt: number
+  perMerchantCeilingPaise?: Record<string, number> | undefined
+  cumulativeApprovalThresholdPaise?: number | undefined
 }
 
 export function insertMandateProposal(
@@ -42,8 +49,9 @@ export function insertMandateProposal(
 ): void {
   db.prepare(
     `INSERT INTO mandate_proposals
-       (id, merchant_id, goal, ceiling_paise, approval_threshold_paise, currency, agent_pubkey_hex, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, merchant_id, goal, ceiling_paise, approval_threshold_paise, currency, agent_pubkey_hex,
+        expires_at, per_merchant_ceiling_json, cumulative_approval_threshold_paise)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     args.id,
     args.merchantId,
@@ -53,7 +61,19 @@ export function insertMandateProposal(
     args.currency,
     args.agentPubkeyHex,
     args.expiresAt,
+    args.perMerchantCeilingPaise ? JSON.stringify(args.perMerchantCeilingPaise) : null,
+    args.cumulativeApprovalThresholdPaise ?? null,
   )
+}
+
+/** Reconstructs the per-merchant ceiling map from its stored JSON column. Returns
+ * `undefined` (never `null`) for an absent policy, matching `IntentMandate`'s own
+ * "absent entirely" convention for optional fields under exactOptionalPropertyTypes. */
+export function parsePerMerchantCeiling(
+  row: Pick<MandateProposalRow, 'per_merchant_ceiling_json'>,
+): Record<string, number> | undefined {
+  if (!row.per_merchant_ceiling_json) return undefined
+  return JSON.parse(row.per_merchant_ceiling_json) as Record<string, number>
 }
 
 export function getMandateProposal(

@@ -65,6 +65,23 @@ export function getCapturedSpend(db: Database.Database, mandateId: string): numb
   return row.spent
 }
 
+/** Cumulative captured spend under one mandate AT a specific merchant, in paise —
+ * for enforcing a per-merchant sub-ceiling. Same "captured only" definition as
+ * {@link getCapturedSpend}, narrowed by merchant. */
+export function getCapturedSpendAtMerchant(
+  db: Database.Database,
+  mandateId: string,
+  merchantId: string,
+): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(amount_paise), 0) AS spent FROM settlements
+       WHERE mandate_id = ? AND merchant_id = ? AND state = 'captured'`,
+    )
+    .get(mandateId, merchantId) as { spent: number }
+  return row.spent
+}
+
 /** Batched form of {@link getCapturedSpend} for listing every mandate's spend in
  * one query. Same definition of "spent" — a mandate absent from the map has no
  * captured settlements, i.e. spend 0. */

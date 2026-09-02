@@ -32,6 +32,7 @@ export type RejectionCode =
   | 'MANDATE_EXPIRED'
   | 'MANDATE_REVOKED'
   | 'AMOUNT_EXCEEDS_CEILING'
+  | 'MERCHANT_LIMIT_EXCEEDED'
   // Not produced by verifyChain. Emitted by the facilitator's settlement service
   // when the one_live_settlement_per_mandate index rejects a second concurrent
   // live settlement — i.e. a purchase is already in flight for this mandate. Kept
@@ -60,6 +61,13 @@ export type VerifyCtx = {
    * the original per-cart check for the first purchase.
    */
   spentPaise?: number
+  /**
+   * Total already-captured spend under this mandate AT the cart's merchant, in
+   * paise. Only consulted when the intent carries a `per_merchant_ceiling_paise`
+   * entry for that merchant; defaults to 0. Like `spentPaise`, the current
+   * settlement is non-terminal and never counts toward its own limit.
+   */
+  merchantSpentPaise?: number
   catalogPrices?: Record<string, number>
   duplicateCart: boolean
   /** Unix-seconds grace window applied to `expires_at`. Default 60. */
@@ -112,6 +120,28 @@ function validateIntentSchema(intent: IntentMandate): string | undefined {
   if (!isSafeInt(intent.expires_at)) return 'expires_at must be an integer unix timestamp'
   if (!isNonEmptyString(intent.agent_pubkey_hex))
     return 'agent_pubkey_hex must be a non-empty string'
+  // Optional spending-policy fields — well-typed if present at all. A malformed
+  // policy is a structural rejection, not silently ignored, since it's signed
+  // authority the human granted and the agent could otherwise dodge by garbling.
+  if (intent.per_merchant_ceiling_paise !== undefined) {
+    const limits = intent.per_merchant_ceiling_paise
+    if (typeof limits !== 'object' || limits === null || Array.isArray(limits)) {
+      return 'per_merchant_ceiling_paise must be an object of merchant -> paise'
+    }
+    for (const [merchant, limit] of Object.entries(limits)) {
+      if (!isNonEmptyString(merchant)) return 'per_merchant_ceiling_paise keys must be merchant ids'
+      if (!isSafeInt(limit) || limit < 0) {
+        return `per_merchant_ceiling_paise[${merchant}] must be a non-negative integer`
+      }
+    }
+  }
+  if (
+    intent.cumulative_approval_threshold_paise !== undefined &&
+    (!isSafeInt(intent.cumulative_approval_threshold_paise) ||
+      intent.cumulative_approval_threshold_paise < 0)
+  ) {
+    return 'cumulative_approval_threshold_paise must be a non-negative integer'
+  }
   if (!isValidSigEnvelope(intent.sig)) return 'sig is not a valid signature envelope'
   return undefined
 }
@@ -226,6 +256,18 @@ export function verifyChain(
     )
   }
 
+  // Per-merchant sub-ceiling, when the human set one for this cart's merchant.
+  const merchantLimit = intent.per_merchant_ceiling_paise?.[cart.merchant_id]
+  if (merchantLimit !== undefined) {
+    const merchantSpent = ctx.merchantSpentPaise ?? 0
+    if (merchantSpent + cart.total_paise > merchantLimit) {
+      return fail(
+        'MERCHANT_LIMIT_EXCEEDED',
+        `cart ${cart.total_paise} + already-spent-at-merchant ${merchantSpent} exceeds the ${cart.merchant_id} limit ${merchantLimit}`,
+      )
+    }
+  }
+
   if (ctx.duplicateCart) return fail('DUPLICATE_CART')
 
   const cartHashHex = sha256Hex(cartBytes)
@@ -233,9 +275,16 @@ export function verifyChain(
     canonicalJson({ intent_hash: intentHashHex, cart_hash: cartHashHex }),
   )
 
+  // Approval fires on the per-cart threshold OR, when the human set a cumulative
+  // line, once total spend would cross it. The cumulative arm closes the
+  // cart-splitting gap: without it, many carts each under the per-cart threshold
+  // drain the whole ceiling with no human check.
+  const crossesCumulative =
+    intent.cumulative_approval_threshold_paise !== undefined &&
+    spentPaise + cart.total_paise > intent.cumulative_approval_threshold_paise
   return {
     ok: true,
-    needsApproval: cart.total_paise > intent.approval_threshold_paise,
+    needsApproval: cart.total_paise > intent.approval_threshold_paise || crossesCumulative,
     mandateCartHashHex,
   }
 }

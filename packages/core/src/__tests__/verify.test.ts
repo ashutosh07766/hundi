@@ -228,6 +228,30 @@ describe('verifyChain — one row per RejectionCode', () => {
     expect(result).toMatchObject({ ok: false, reason: 'MERCHANT_NOT_IN_SCOPE' })
   })
 
+  it('MERCHANT_LIMIT_EXCEEDED: cart + prior merchant spend above the per-merchant sub-ceiling', () => {
+    // Global ceiling 500_000 fits the 200_000 cart, but the merchant-1 sub-ceiling
+    // is 150_000, so the cart alone already blows it.
+    const { intent, agent } = makeIntent({
+      overrides: { ceiling_paise: 500_000, per_merchant_ceiling_paise: { 'merchant-1': 150_000 } },
+    })
+    const cart = makeCart({ agent, intent })
+    const result = verifyChain(intent, cart, baseCtx({ credential: credentialFor(agent) }))
+    expect(result).toMatchObject({ ok: false, reason: 'MERCHANT_LIMIT_EXCEEDED' })
+  })
+
+  it('per-merchant sub-ceiling: passes while merchant spend stays within the limit', () => {
+    const { intent, agent } = makeIntent({
+      overrides: { ceiling_paise: 500_000, per_merchant_ceiling_paise: { 'merchant-1': 300_000 } },
+    })
+    const cart = makeCart({ agent, intent })
+    const result = verifyChain(
+      intent,
+      cart,
+      baseCtx({ credential: credentialFor(agent), merchantSpentPaise: 50_000 }),
+    )
+    expect(result.ok).toBe(true)
+  })
+
   it('MANDATE_EXPIRED: now is past expiry + skew', () => {
     const { intent, agent } = makeIntent({ overrides: { expires_at: 1_000 } })
     const cart = makeCart({ agent, intent })
@@ -310,6 +334,40 @@ describe('verifyChain — boundaries', () => {
     })
     const result = verifyChain(intent, cart, baseCtx({ credential: credentialFor(agent) }))
     expect(result).toMatchObject({ ok: true, needsApproval: true })
+  })
+
+  it('cumulative approval line: a sub-per-cart-threshold cart still needs approval once total spend crosses it', () => {
+    // Per-cart threshold 300_000 would NOT flag this 200_000 cart, but the
+    // cumulative line is 250_000 and prior spend is 100_000, so 300_000 crosses
+    // it — the cart-splitting gap is closed.
+    const { intent, agent } = makeIntent({
+      overrides: {
+        ceiling_paise: 1_000_000,
+        approval_threshold_paise: 300_000,
+        cumulative_approval_threshold_paise: 250_000,
+      },
+    })
+    const cart = makeCart({ agent, intent })
+    const result = verifyChain(
+      intent,
+      cart,
+      baseCtx({ credential: credentialFor(agent), spentPaise: 100_000 }),
+    )
+    expect(result).toMatchObject({ ok: true, needsApproval: true })
+  })
+
+  it('signed policy is tamper-evident: editing per_merchant_ceiling_paise after signing fails SIG_INVALID_INTENT', () => {
+    const { intent, agent } = makeIntent({
+      overrides: { per_merchant_ceiling_paise: { 'merchant-1': 150_000 } },
+    })
+    // Loosen the merchant limit after the human signed — the signature must reject it.
+    const tampered = {
+      ...intent,
+      per_merchant_ceiling_paise: { 'merchant-1': 900_000 },
+    }
+    const cart = makeCart({ agent, intent: tampered })
+    const result = verifyChain(tampered, cart, baseCtx({ credential: credentialFor(agent) }))
+    expect(result).toMatchObject({ ok: false, reason: 'SIG_INVALID_INTENT' })
   })
 
   it('expiry at exactly now - skew passes', () => {

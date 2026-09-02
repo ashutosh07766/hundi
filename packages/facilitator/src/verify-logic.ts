@@ -9,7 +9,12 @@
 import type { CartMandate, IntentMandate, VerifyCtx } from '@hundi/core'
 import { canonicalJson, cartSigningBytes, intentSigningBytes, sha256Hex } from '@hundi/core'
 import type Database from 'better-sqlite3'
-import { credentialFromRow, getCapturedSpend, getMandateRow } from './mandate-repo.js'
+import {
+  credentialFromRow,
+  getCapturedSpend,
+  getCapturedSpendAtMerchant,
+  getMandateRow,
+} from './mandate-repo.js'
 
 /**
  * Content-addressed identifier for one intent+cart pairing. Pure — computed
@@ -54,6 +59,13 @@ export function buildVerifyCtx(
   // capture. Shared with GET /mandates via getCapturedSpend so the two agree.
   const spentPaise = getCapturedSpend(db, intent.mandateId)
 
+  // Per-merchant spend is only needed when the intent sets a sub-ceiling for this
+  // cart's merchant — skip the query otherwise.
+  const merchantSpentPaise =
+    intent.per_merchant_ceiling_paise?.[cart.merchant_id] !== undefined
+      ? getCapturedSpendAtMerchant(db, intent.mandateId, cart.merchant_id)
+      : undefined
+
   const mandateCartHashHex = computeMandateCartHash(intent, cart)
 
   const dupRow = opts.excludeSettlementId
@@ -87,6 +99,7 @@ export function buildVerifyCtx(
     revoked,
     spentPaise,
     duplicateCart,
+    ...(merchantSpentPaise !== undefined ? { merchantSpentPaise } : {}),
     ...(credential ? { credential } : {}),
     ...(catalogPrices ? { catalogPrices } : {}),
   }

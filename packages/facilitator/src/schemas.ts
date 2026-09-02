@@ -37,6 +37,12 @@ const intentMandateSchema = z.object({
   merchants: z.array(z.string().min(1)).min(1),
   expires_at: z.number().int(),
   agent_pubkey_hex: z.string().min(1),
+  // Optional spending policy — must survive ingest, since it's part of the human's
+  // signed intent (stripping it would break the signature, the variant_id lesson).
+  per_merchant_ceiling_paise: z
+    .record(z.string().min(1), z.number().int().nonnegative())
+    .optional(),
+  cumulative_approval_threshold_paise: z.number().int().nonnegative().optional(),
   sig: sigEnvelopeSchema,
 })
 

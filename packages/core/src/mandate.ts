@@ -33,6 +33,20 @@ export type IntentMandate = {
   /** Unix seconds. */
   expires_at: number
   agent_pubkey_hex: string
+  /** Optional per-merchant sub-ceilings (paise). When a merchant appears here, the
+   * agent's cumulative captured spend AT THAT MERCHANT may not exceed this, on top
+   * of (and never above) the global `ceiling_paise`. A merchant not listed is
+   * bounded only by the global ceiling. Signed — the human authorizes the split.
+   * Absent entirely (never `null`) leaves the signing bytes byte-identical to the
+   * pre-policy shape; `| undefined` lets a Zod-validated intent feed this type
+   * under exactOptionalPropertyTypes. */
+  per_merchant_ceiling_paise?: Record<string, number> | undefined
+  /** Optional cumulative approval line (paise). When set, a purchase needs human
+   * approval once total captured spend WOULD cross this line — closing the gap the
+   * per-cart `approval_threshold_paise` leaves open, where many sub-threshold carts
+   * drain the whole ceiling hands-free. Absent → only the per-cart threshold
+   * applies, byte-identical to the pre-policy shape. */
+  cumulative_approval_threshold_paise?: number | undefined
   sig: SigEnvelope
 }
 
@@ -76,6 +90,9 @@ export type CartMandate = {
 
 /** Canonical bytes covered by the human's intent signature — everything in `IntentMandate` but `sig`. */
 export function intentSigningBytes(intent: Omit<IntentMandate, 'sig'>): Uint8Array {
+  // Optional policy fields are included ONLY when present, so an intent without
+  // them signs byte-identically to the pre-policy shape (existing mandates keep
+  // verifying). canonicalJson sorts keys, so position here doesn't matter.
   return canonicalJson({
     mandateId: intent.mandateId,
     goal: intent.goal,
@@ -85,6 +102,12 @@ export function intentSigningBytes(intent: Omit<IntentMandate, 'sig'>): Uint8Arr
     merchants: intent.merchants,
     expires_at: intent.expires_at,
     agent_pubkey_hex: intent.agent_pubkey_hex,
+    ...(intent.per_merchant_ceiling_paise
+      ? { per_merchant_ceiling_paise: intent.per_merchant_ceiling_paise }
+      : {}),
+    ...(intent.cumulative_approval_threshold_paise !== undefined
+      ? { cumulative_approval_threshold_paise: intent.cumulative_approval_threshold_paise }
+      : {}),
   })
 }
 

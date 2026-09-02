@@ -7,8 +7,8 @@
  * the signed bytes at all. */
 
 import { describe, expect, it } from 'vitest'
-import type { CartMandate } from '../mandate.js'
-import { cartSigningBytes } from '../mandate.js'
+import type { CartMandate, IntentMandate } from '../mandate.js'
+import { cartSigningBytes, intentSigningBytes } from '../mandate.js'
 
 type UnsignedCart = Omit<CartMandate, 'agent_sig_hex'>
 
@@ -80,5 +80,51 @@ describe('cartSigningBytes — with variant_id', () => {
     expect(text).toContain('"variant_id":"variant-11-black"')
     expect(text).not.toContain('variant_label')
     expect(text).not.toContain('11 / Black')
+  })
+})
+
+type UnsignedIntent = Omit<IntentMandate, 'sig'>
+
+const BASE_INTENT: UnsignedIntent = {
+  mandateId: 'mandate-1',
+  goal: 'buy running shoes',
+  ceiling_paise: 500_000,
+  approval_threshold_paise: 200_000,
+  currency: 'INR',
+  merchants: ['merchant-1'],
+  expires_at: 2_000_000_000,
+  agent_pubkey_hex: 'aa'.repeat(32),
+}
+
+describe('intentSigningBytes — no goal_keywords (byte-compat regression guard)', () => {
+  it('never emits a `goal_keywords` key when the intent carries none', () => {
+    const text = decode(intentSigningBytes(BASE_INTENT))
+    expect(text).not.toContain('goal_keywords')
+  })
+
+  it('matches the exact pre-goal-binding canonical shape', () => {
+    const text = decode(intentSigningBytes(BASE_INTENT))
+    expect(text).toBe(
+      '{"agent_pubkey_hex":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",' +
+        '"approval_threshold_paise":200000,"ceiling_paise":500000,"currency":"INR",' +
+        '"expires_at":2000000000,"goal":"buy running shoes","mandateId":"mandate-1",' +
+        '"merchants":["merchant-1"]}',
+    )
+  })
+})
+
+describe('intentSigningBytes — with goal_keywords', () => {
+  it('changes the signed bytes relative to the same intent without goal_keywords', () => {
+    const withGoal: UnsignedIntent = { ...BASE_INTENT, goal_keywords: ['running shoe'] }
+    expect(decode(intentSigningBytes(withGoal))).not.toBe(decode(intentSigningBytes(BASE_INTENT)))
+  })
+
+  it('includes goal_keywords in the signed bytes', () => {
+    const withGoal: UnsignedIntent = {
+      ...BASE_INTENT,
+      goal_keywords: ['running shoe', 'sneaker'],
+    }
+    const text = decode(intentSigningBytes(withGoal))
+    expect(text).toContain('"goal_keywords":["running shoe","sneaker"]')
   })
 })

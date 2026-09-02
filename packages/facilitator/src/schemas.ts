@@ -43,6 +43,9 @@ const intentMandateSchema = z.object({
     .record(z.string().min(1), z.number().int().nonnegative())
     .optional(),
   cumulative_approval_threshold_paise: z.number().int().nonnegative().optional(),
+  // Optional purpose restriction — also part of the human's signed intent (same
+  // ingest-survival requirement as the policy fields above).
+  goal_keywords: z.array(z.string().min(1)).min(1).optional(),
   sig: sigEnvelopeSchema,
 })
 
@@ -132,6 +135,11 @@ export const mandateProposeBodySchema = z.object({
     .record(z.string().min(1), z.number().int().nonnegative())
     .optional(),
   cumulative_approval_threshold_paise: z.number().int().nonnegative().optional(),
+  // Mirrors IntentMandate's own optional goal_keywords (see core/mandate.ts) — a
+  // proposal must be able to carry the same purpose restriction the eventual
+  // signed intent will, or approving it one-tap would silently drop the scope
+  // the agent asked for.
+  goal_keywords: z.array(z.string().min(1)).min(1).optional(),
 })
 
 export const adminMerchantBodySchema = z.object({

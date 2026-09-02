@@ -47,6 +47,15 @@ export type IntentMandate = {
    * drain the whole ceiling hands-free. Absent → only the per-cart threshold
    * applies, byte-identical to the pre-policy shape. */
   cumulative_approval_threshold_paise?: number | undefined
+  /** Optional purpose restriction (signed). When set, every cart item must match at
+   * least one keyword (case-insensitive substring) against the product text the
+   * facilitator resolves for it — a "running shoes" mandate can't quietly buy a
+   * blender. A cart item whose product text can't be resolved fails closed rather
+   * than passing unchecked, since the human explicitly scoped what this money is
+   * for. Absent entirely (never `null`) leaves the signing bytes byte-identical to
+   * the pre-goal-binding shape, same convention as the other optional policy fields
+   * above. */
+  goal_keywords?: string[] | undefined
   sig: SigEnvelope
 }
 
@@ -108,6 +117,7 @@ export function intentSigningBytes(intent: Omit<IntentMandate, 'sig'>): Uint8Arr
     ...(intent.cumulative_approval_threshold_paise !== undefined
       ? { cumulative_approval_threshold_paise: intent.cumulative_approval_threshold_paise }
       : {}),
+    ...(intent.goal_keywords ? { goal_keywords: intent.goal_keywords } : {}),
   })
 }
 

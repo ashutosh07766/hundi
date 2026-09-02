@@ -1,7 +1,9 @@
 import type { CanonicalValue } from '@hundi/core'
 import { canonicalJson, sha256Hex } from '@hundi/core'
 import { describe, expect, it } from 'vitest'
+import type { FeedProduct } from '../feed-product.js'
 import { transitionSettlement } from '../state-machine.js'
+import { upsertStoreCatalog } from '../store-catalog-repo.js'
 import { credentialFor, makeCart, makeIntent } from './fixtures.js'
 import { getJson, makeTestApp, postJson, registerMandate, TEST_ENV } from './http-helpers.js'
 
@@ -454,6 +456,106 @@ describe('POST /settlements — per-merchant sub-ceiling', () => {
       ok: true,
       state: 'rejected',
       reason: 'MERCHANT_LIMIT_EXCEEDED',
+    })
+  })
+})
+
+describe('POST /settlements — goal-bound mandate (intent-binding)', () => {
+  function feedProduct(overrides: Partial<FeedProduct> = {}): FeedProduct {
+    return {
+      id: 'sku-1',
+      title: 'Generic Product',
+      description: 'A generic product.',
+      price_paise: 100_000,
+      currency: 'INR',
+      availability: { status: 'in_stock' },
+      image: 'https://example.com/img.jpg',
+      brand: 'Generic Brand',
+      merchant_id: 'merchant-1',
+      ...overrides,
+    }
+  }
+
+  it('rejects an off-goal cart GOAL_MISMATCH while an on-goal cart passes, against the same mandate + catalog', async () => {
+    const { app, db } = makeTestApp()
+    const { intent, agent } = makeIntent({
+      overrides: { goal_keywords: ['running shoe', 'sneaker'] },
+    })
+    await registerMandate(app, intent, credentialFor(agent))
+
+    upsertStoreCatalog(db, {
+      merchantId: 'merchant-1',
+      name: 'Merchant One',
+      sourceUrl: null,
+      products: [
+        feedProduct({
+          id: 'sku-shoe',
+          title: 'Velocity Air Running Shoe',
+          brand: 'Velocity Run',
+          description: 'Lightweight everyday trainer.',
+        }),
+        feedProduct({
+          id: 'sku-blender',
+          title: 'PowerBlend 900 Countertop Blender',
+          brand: 'PowerBlend',
+          description: 'A 900W countertop blender for smoothies.',
+        }),
+      ],
+    })
+
+    const blenderCart = makeCart({
+      agent,
+      intent,
+      items: [{ sku: 'sku-blender', qty: 1, unit_price_paise: 100_000 }],
+      overrides: { cartId: 'goal-blender-cart' },
+    })
+    const blenderRes = await postJson(
+      app,
+      '/settlements',
+      { intent, cart: blenderCart },
+      { 'Idempotency-Key': 'idem-goal-blender' },
+    )
+    expect(blenderRes.status).toBe(202)
+    expect(await blenderRes.json()).toMatchObject({
+      ok: true,
+      state: 'rejected',
+      reason: 'GOAL_MISMATCH',
+    })
+
+    const shoeCart = makeCart({
+      agent,
+      intent,
+      items: [{ sku: 'sku-shoe', qty: 1, unit_price_paise: 100_000 }],
+      overrides: { cartId: 'goal-shoe-cart' },
+    })
+    const shoeRes = await postJson(
+      app,
+      '/settlements',
+      { intent, cart: shoeCart },
+      { 'Idempotency-Key': 'idem-goal-shoe' },
+    )
+    expect(shoeRes.status).toBe(202)
+    expect(await shoeRes.json()).not.toMatchObject({ state: 'rejected', reason: 'GOAL_MISMATCH' })
+  })
+
+  it('GOAL_MISMATCH: fails closed when the sku is not in the merchant catalog at all', async () => {
+    const { app } = makeTestApp()
+    const { intent, agent } = makeIntent({ overrides: { goal_keywords: ['running shoe'] } })
+    await registerMandate(app, intent, credentialFor(agent))
+    // No store_catalogs row registered for merchant-1 at all — every sku is unresolvable.
+
+    const cart = makeCart({ agent, intent, overrides: { cartId: 'goal-no-catalog-cart' } })
+    const res = await postJson(
+      app,
+      '/settlements',
+      { intent, cart },
+      { 'Idempotency-Key': 'idem-goal-no-catalog' },
+    )
+    expect(res.status).toBe(202)
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      state: 'rejected',
+      reason: 'GOAL_MISMATCH',
     })
   })
 })

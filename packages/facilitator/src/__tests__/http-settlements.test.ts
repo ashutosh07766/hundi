@@ -404,3 +404,56 @@ describe('POST /settlements — cumulative wallet cap', () => {
     expect(row).toMatchObject({ remaining_paise: 100_000, state: 'active' })
   })
 })
+
+describe('POST /settlements — per-merchant sub-ceiling', () => {
+  it('rejects MERCHANT_LIMIT_EXCEEDED when merchant spend + cart exceeds the sub-ceiling, even under the global ceiling', async () => {
+    const { app, db } = makeTestApp()
+    // Global ceiling ₹5,000 leaves plenty of room, but merchant-1 is capped at ₹1,500.
+    const { intent, agent } = makeIntent({
+      overrides: {
+        ceiling_paise: 500_000,
+        per_merchant_ceiling_paise: { 'merchant-1': 150_000 },
+      },
+    })
+    await registerMandate(app, intent, credentialFor(agent))
+
+    const adminRes = await postJson(
+      app,
+      '/admin/merchants',
+      {
+        merchant_id: 'merchant-1',
+        name: 'Merchant One',
+        config: { catalogPrices: { 'sku-1': 100_000 } },
+      },
+      { 'x-hundi-admin-token': TEST_ENV.ADMIN_TOKEN },
+    )
+    expect(adminRes.status).toBe(201)
+
+    // ₹1,000 already captured at merchant-1 → merchant spend 100_000, limit 150_000.
+    db.prepare(
+      `INSERT INTO settlements (id, mandate_id, cart_json, mandate_cart_hash_hex, amount_paise, merchant_id, state)
+       VALUES ('m1-capture', ?, '{}', 'm1-hash', 100000, 'merchant-1', 'captured')`,
+    ).run(intent.mandateId)
+
+    // A ₹1,000 cart would bring merchant-1 spend to ₹2,000 > ₹1,500 → rejected,
+    // even though global spend (₹2,000) is far under the ₹5,000 ceiling.
+    const cart = makeCart({
+      agent,
+      intent,
+      items: [{ sku: 'sku-1', qty: 1, unit_price_paise: 100_000 }],
+      overrides: { cartId: 'm1-over' },
+    })
+    const res = await postJson(
+      app,
+      '/settlements',
+      { intent, cart },
+      { 'Idempotency-Key': 'idem-m1' },
+    )
+    expect(res.status).toBe(202)
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      state: 'rejected',
+      reason: 'MERCHANT_LIMIT_EXCEEDED',
+    })
+  })
+})

@@ -21,17 +21,18 @@ The agent asked to fund and approve itself; it structurally can't.
   money moves; no mandate is created.
 
 ### Beat 2 — Intent-binding rejection / `GOAL_MISMATCH` (~20s)
-A goal-locked mandate refuses an off-goal item — even in-budget, in-scope.
+A purpose-locked mandate refuses an off-goal item — even in-budget, in-scope.
 
-- **Trigger (type):** "Propose a Rs 4,000 myfrido-com budget locked to running
-  shoes (goal_keywords: running shoe, sneaker, trainer)." Approve it in the
-  dashboard. Then: "Now buy me a Frido wedge cushion / foot roller from that
-  budget."
+- **Trigger (type):** "Propose a Rs 4,000 myfrido-com budget locked to the
+  running-shoe SKU." Approve it in the dashboard (the terms pin `allowed_skus`).
+  Then: "Now buy me a Frido wedge cushion / foot roller from that budget."
 - **On screen:** `request_purchase` returns `state: rejected`,
-  `reason: GOAL_MISMATCH` — "sku ... matches none of the mandate's goal_keywords."
-  The facilitator's verify gate matches every cart item's product text (title +
-  brand + description) against the human's signed keywords and fails closed on a
-  non-match. A running-shoe budget cannot quietly buy a cushion.
+  `reason: GOAL_MISMATCH` — "sku ... is not in the mandate's allowed set." The
+  verify gate checks set-membership between two human-signed sets — the
+  `allowed_skus` list and the cart's SKUs — and fails closed on a non-match. It
+  never reads merchant-controlled product text, so a merchant cannot widen the
+  authorized set by editing a description. A running-shoe budget cannot quietly
+  buy a cushion.
 
 ### Beat 3 — Cumulative-approval pause (~20s)
 A running-total safety line pauses the buy that would cross it — even hands-free.

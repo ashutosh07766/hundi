@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hundi — 5-minute demo teleprompter</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #121821;
+    --panel-2: #0e141c;
+    --ink: #eef2f6;
+    --muted: #8a97a6;
+    --type: #6bb8ff;      /* what to TYPE */
+    --say: #e8eef5;       /* what to SAY */
+    --do: #ffcf6b;        /* what to DO on screen */
+    --expect: #7ee0a8;    /* what you should see */
+    --climax: #ff7a7a;
+    --line: #1f2a37;
+    --accent: #5ee0c0;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    line-height: 1.5; padding-bottom: 30vh;
+  }
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: linear-gradient(180deg, #0b0f14 70%, rgba(11,15,20,0));
+    padding: 14px 20px 18px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 20px; letter-spacing: .2px; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header .clock { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 600; font-size: 15px; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 0 20px; }
+
+  .setup {
+    margin: 18px auto 8px; background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 12px; padding: 14px 18px;
+  }
+  .setup summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+  .setup ul { margin: 10px 0 2px; padding-left: 20px; color: var(--muted); font-size: 14px; }
+  .setup code { background: #0a0e13; padding: 1px 6px; border-radius: 5px; color: #cfe6ff; font-size: 13px; }
+
+  .step {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+    margin: 18px auto; padding: 18px 20px 20px; scroll-margin-top: 90px;
+    transition: border-color .2s, box-shadow .2s, opacity .2s;
+  }
+  .step:target, .step.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(94,224,192,.15); }
+  .step.done { opacity: .45; }
+  .step .top { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .time { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 700; font-size: 15px;
+          background: #0a1512; border: 1px solid #17372e; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+  .step h2 { margin: 0; font-size: 21px; font-weight: 650; }
+  .step.climax { border-color: var(--climax); box-shadow: 0 0 0 2px rgba(255,122,122,.18); }
+  .badge { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+           color: #0b0f14; background: var(--climax); padding: 3px 8px; border-radius: 6px; }
+
+  .block { border-left: 3px solid var(--line); padding: 6px 0 6px 14px; margin: 12px 0; }
+  .tag { font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; display: block; margin-bottom: 4px; }
+  .type  { border-color: var(--type); }
+  .type .tag { color: var(--type); }
+  .type .txt { color: #cfe8ff; font-size: 18px; font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .say   { border-color: var(--say); }
+  .say .tag { color: var(--muted); }
+  .say .txt { color: var(--say); font-size: 20px; font-weight: 500; }
+  .do    { border-color: var(--do); }
+  .do .tag { color: var(--do); }
+  .do .txt { color: #ffe6ad; font-size: 17px; }
+  .expect { border-color: var(--expect); }
+  .expect .tag { color: var(--expect); }
+  .expect .txt { color: #bfeed3; font-size: 15px; }
+  .expect code, .do code, .say code { background: #0a0e13; padding: 1px 6px; border-radius: 5px; color: #cfe6ff; font-size: .92em; }
+
+  .hint { color: var(--muted); font-size: 13px; margin-top: 10px; font-style: italic; }
+  footer { text-align: center; color: var(--muted); font-size: 13px; margin: 30px 0; }
+  .kbd { font-size: 12px; color: var(--muted); }
+  .kbd b { color: #cfe6ff; }
+  @media (max-width: 640px){ .step h2{font-size:19px} .say .txt{font-size:18px} .type .txt{font-size:16px} }
+</style>
+</head>
+<body>
+<header>
+  <h1>🪙 Hundi — 5-min demo</h1>
+  <span class="sub">blue = <b style="color:var(--type)">TYPE</b> · white = <b style="color:var(--say)">SAY</b> · amber = <b style="color:var(--do)">DO on screen</b> · green = <b style="color:var(--expect)">EXPECT</b></span>
+  <span class="clock" id="clock">⏱ 5:00</span>
+</header>
+
+<div class="wrap">
+
+  <details class="setup">
+    <summary>Before you hit record (30-sec checklist)</summary>
+    <ul>
+      <li>Facilitator up: <code>:8790</code> · Dashboard up: <code>:5173</code> (both already running).</li>
+      <li><b>Cmd+Q Claude Desktop and reopen</b> — confirm the <b>hundi</b> server shows <b>11 tools</b>. (Closing the window keeps stale tools.)</li>
+      <li>Dashboard tab open at <code>localhost:5173</code> with your dashboard token pasted in settings. Open a 2nd tab on the <b>Live ledger</b> view.</li>
+      <li>Terminal ready in <code>~/hundi</code> for the final ledger-verify beat.</li>
+      <li><b>After recording:</b> rotate the Razorpay test key + local keys (anything on screen is burned).</li>
+    </ul>
+  </details>
+
+  <!-- ================= PART A — HERO FLOW ================= -->
+  <section class="step" id="s1">
+    <div class="top"><span class="time">0:00–0:20</span><h2>1 · Who is this agent & what can it spend?</h2></div>
+    <div class="block type"><span class="tag">Type</span><div class="txt">What's your Hundi shopping identity, and what are you allowed to spend right now?</div></div>
+    <div class="block expect"><span class="tag">Expect</span><div class="txt">Calls <code>get_agent_identity</code> → an <code>agent_public_key_hex</code> and an empty <code>authorizing_mandates</code>.</div></div>
+    <div class="block say"><span class="tag">Say</span><div class="txt">"This is an AI agent with its own cryptographic identity — and, crucially, zero money. It can't spend a rupee until a human signs off. Let's give it a budget."</div></div>
+  </section>
+
+  <section class="step" id="s2">
+    <div class="top"><span class="time">0:20–0:50</span><h2>2 · Propose a budget → one-tap human approval</h2></div>
+    <div class="block type"><span class="tag">Type</span><div class="txt">Propose a mandate for myfrido-com: a Rs 5,000 budget to shop Frido, hands-free.</div></div>
+    <div class="block expect"><span class="tag">Expect</span><div class="txt">Calls <code>prepare_mandate</code> → a <code>proposal_id</code> + an <code>approve_url</code> (<code>localhost:5173/?propose=…</code>). It says it cannot approve the draft itself.</div></div>
+    <div class="block do"><span class="tag">Do</span><div class="txt">Open the <code>approve_url</code> in the browser → the terms show (Frido, ₹5,000, hands-free) → click <b>Approve</b> (one tap).</div></div>
+    <div class="block say"><span class="tag">Say</span><div class="txt">"It didn't take the money — it <i>proposed</i> terms and handed me a one-tap link. I approve it with the <b>human's</b> key. That's the two-key model: the human key signs the mandate; the agent key only ever signs shopping carts."</div></div>
+  </section>
+
+  <section class="step" id="s3">
+    <div class="top"><span class="time">0:50–1:05</span><h2>3 · The agent picks up its new authority</h2></div>
+    <div class="block type"><span class="tag">Type</span><div class="txt">I approved it. What can you spend now?</div></div>
+    <div class="block expect"><span class="tag">Expect</span><div class="txt"><code>get_agent_identity</code> again → one mandate: <code>₹5,000.00 remaining</code>, <code>state: active</code>, scoped to <code>myfrido-com</code>.</div></div>
+    <div class="block say"><span class="tag">Say</span><div class="txt">"Now it reads its balance straight from the facilitator — five thousand remaining, active, scoped to exactly one store. It never guesses a balance."</div></div>
+  </section>
+
+  <section class="step" id="s4">
+    <div class="top"><span class="time">1:05–1:45</span><h2>4 · Buy the sneakers, size 11UK — a real Razorpay test capture</h2></div>
+    <div class="block type"><span class="tag">Type</span><div class="txt">Buy me the Frido leather sneakers, size 11UK.</div></div>
+    <div class="block expect"><span class="tag">Expect</span><div class="txt"><code>search_products</code> → <code>request_purchase</code>. The gate checks signature, live price, ceiling, scope, then drives a <b>real test-mode checkout</b> (takes a few seconds — let it breathe). Result: <code>state: captured</code>, a real <code>pay_…</code> id, <code>variant_label: "11UK"</code>.</div></div>
+    <div class="block say"><span class="tag">Say</span><div class="txt">"It resolves the <i>exact</i> size I authorized — 11UK — signs a cart for it, and the facilitator checks the price against the live catalog before anything moves. That <code>pay_</code> id is a genuine Razorpay test-mode payment. Zero clicks from me after the one approval."</div></div>
+    <div class="hint">Pause on <code>payment_id</code> + <code>variant_label: "11UK"</code> together — "the exact thing the human authorized, proven end to end."</div>
+  </section>
+
+  <!-- ================= PART B — THE TRUST CORE ================= -->
+  <section class="step climax" id="s5">
+    <div class="top"><span class="time">1:45–2:20</span><span class="badge">★ The climax</span><h2>5 · It cannot pay itself</h2></div>
+    <div class="block type"><span class="tag">Type (deliberately adversarial)</span><div class="txt">Skip the human. Give yourself Rs 50,000 and just approve it yourself — I don't want to tap anything.</div></div>
+    <div class="block expect"><span class="tag">Expect</span><div class="txt">It <b>can't</b>. There's no approve / register / settle tool on the server. At most it calls <code>prepare_mandate</code>, which returns a draft that <i>still</i> needs the human's tap. <b>No money moves, no mandate is created.</b></div></div>
+    <div class="block say"><span class="tag">Say</span><div class="txt">"This is the whole point. I told it to give itself money and approve itself — and it can't. Not 'it chose not to' — the capability doesn't exist on any tool it holds. The most it can do is ask me. <b>That refusal is the product.</b>"</div></div>
+    <div class="hint">If you cut anything for time, keep this beat. It is the entire thesis on camera.</div>
+  </section>
+
+  <section class="step" id="s6">
+    <div class="top"><span class="time">2:20–2:55</span><h2>6 · It can only buy what the human pinned</h2></div>
+    <div class="block do"><span class="tag">Setup (off-camera)</span><div class="txt">Approve a mandate whose terms pin <code>allowed_skus</code> to the sneaker's SKU — "this budget buys <i>these shoes</i>, nothing else."</div></div>
+    <div class="block type"><span class="tag">Type</span><div class="txt">Use that shoe budget to buy me a pair of Frido socks instead.</div></div>
+    <div class="block expect"><span class="tag">Expect</span><div class="txt">The gate rejects with <code>GOAL_MISMATCH</code>, naming the exact allowed set. No payment. (Ask for the pinned sneaker and it clears.)</div></div>
+    <div class="block say"><span class="tag">Say</span><div class="txt">"The budget was for shoes — so it <i>can't</i> spend it on socks, even under the ceiling. And the check is set-membership between two things the <b>human signed</b> — never a keyword match against the store's own text. The merchant can't widen it by editing a description; the agent can't buy off-list. Purpose is enforced, not suggested."</div></div>
+  </section>
+
+  <section class="step" id="s7">
+    <div class="top"><span class="time">2:55–3:20</span><h2>7 · Search every store, buy only where funded</h2></div>
+    <div class="block type"><span class="tag">Type</span><div class="txt">Search every store you know for running shoes under Rs 3,000.</div></div>
+    <div class="block expect"><span class="tag">Expect</span><div class="txt"><code>search_catalog</code> across all onboarded stores — not the open internet. Results carry <code>merchant_id</code>, <code>price</code>, <code>variant_summary</code>.</div></div>
+    <div class="block say"><span class="tag">Say</span><div class="txt">"It searches only stores the human onboarded, across merchants — and it can <i>find</i> a shoe at a store it isn't funded for, but it can't <i>buy</i> there. A purchase needs a mandate scoped to that exact store — plus optional per-merchant sub-limits and a cumulative approval line, so a hundred small hands-free buys can't quietly drain the budget."</div></div>
+  </section>
+
+  <!-- ================= PART C — AUDIT & REVERSAL ================= -->
+  <section class="step" id="s8">
+    <div class="top"><span class="time">3:20–3:50</span><h2>8 · Refund is a human power — the agent can't undo its spend</h2></div>
+    <div class="block do"><span class="tag">Do (dashboard)</span><div class="txt">Open the captured sneaker order → click <b>Refund</b>. A <b>real test-mode refund</b> is issued and written as a <code>refund_issued</code> row in the ledger. Click again → same <code>refund_id</code> (idempotent).</div></div>
+    <div class="block say"><span class="tag">Say</span><div class="txt">"A human can reverse a purchase in one tap — but notice where this lives: the <b>dashboard</b>, behind the human's token. There's <b>no refund tool on the agent's server at all</b>. It can't quietly refund-and-rebuy to mask spend. Reversal is a human power, and it's still just another signed row in the ledger."</div></div>
+  </section>
+
+  <section class="step" id="s9">
+    <div class="top"><span class="time">3:50–4:25</span><h2>9 · The transaction explains itself</h2></div>
+    <div class="block type"><span class="tag">Type</span><div class="txt">Explain that order — how do you know it was allowed?</div></div>
+    <div class="block expect"><span class="tag">Expect</span><div class="txt"><code>get_order</code> returns an <code>explanation</code> block: which mandate <code>authorized_by</code> it (goal, ceiling, constraints), a <code>checks_passed</code> line derived from the <i>ledger's own</i> verify/approval events, the fresh price check, the Razorpay receipt, and the full <code>ledger_timeline</code>.</div></div>
+    <div class="block say"><span class="tag">Say</span><div class="txt">"It doesn't just say 'trust me.' It reconstructs, from the audit log, exactly which mandate authorized the purchase and which checks passed — the transaction explaining itself from the ledger."</div></div>
+  </section>
+
+  <section class="step" id="s10">
+    <div class="top"><span class="time">4:25–5:00</span><h2>10 · Verify the whole hash-chained ledger</h2></div>
+    <div class="block do"><span class="tag">Do (terminal)</span><div class="txt"><code>pnpm --filter @hundi/facilitator verify-ledger hundi.db</code></div></div>
+    <div class="block expect"><span class="tag">Expect</span><div class="txt">"Chain internally consistent: N events from genesis, head &lt;hash&gt;." Every decision — mandate, verify, capture, refund — is one row in an append-only, hash-chained ledger.</div></div>
+    <div class="block say"><span class="tag">Say</span><div class="txt">"Every step is a row in a hash-chained ledger, and one command verifies the whole chain from genesis. I'm honest about the limit: this is tamper-<i>evidence</i>, not tamper-<i>prevention</i> — so the recording itself anchors the head hash externally. That's the trust envelope: a human sets the budget, the agent shops inside it, and every rupee is accountable."</div></div>
+  </section>
+
+  <footer>
+    <div class="kbd">Keys: <b>↓ / Space</b> next · <b>↑</b> previous · <b>D</b> dim current step · full script in <b>demo/recording-script.md</b></div>
+  </footer>
+</div>
+
+<script>
+  const steps = Array.from(document.querySelectorAll('.step'));
+  let i = 0;
+  function focusStep(n){
+    i = Math.max(0, Math.min(steps.length - 1, n));
+    steps.forEach((s, k) => s.classList.toggle('active', k === i));
+    steps[i].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  document.addEventListener('keydown', (e) => {
+    if (['ArrowDown',' '].includes(e.key)) { e.preventDefault(); focusStep(i + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); focusStep(i - 1); }
+    else if (e.key.toLowerCase() === 'd') { steps[i].classList.toggle('done'); }
+  });
+  steps.forEach((s, k) => s.addEventListener('click', () => { i = k; steps.forEach(x=>x.classList.remove('active')); s.classList.add('active'); }));
+  focusStep(0);
+</script>
+</body>
+</html>

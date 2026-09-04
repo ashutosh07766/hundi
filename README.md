@@ -23,10 +23,16 @@ handled gracefully."*
 - **Bounded hands-free spend.** Per-purchase and cumulative approval lines,
   plus per-merchant sub-limits, so many small auto-buys still can't drain
   the ceiling.
-- **Goal-locked mandates.** Optional goal_keywords bind a mandate to a
-  purpose; an off-goal item is rejected GOAL_MISMATCH.
+- **Purpose-locked mandates.** An optional signed `allowed_skus` set pins a
+  mandate to specific items; a cart with any off-list SKU is rejected
+  GOAL_MISMATCH. The check is set-membership between two human-signed sets —
+  never a keyword match against merchant-controlled product text — so the
+  merchant can't widen the authorization and the agent can't buy off-list.
 - **Human-in-the-loop approvals.** Anything over the threshold parks as
   pending_approval and waits for a human-signed decision in the dashboard.
+- **Human-only refunds.** A human reverses a capture from the dashboard (a
+  real test-mode refund, recorded in the ledger). There is no refund tool on
+  the agent's interface — it cannot undo or mask its own spend.
 - **Idempotency + graceful failure.** Retries replay instead of
   double-charging; failed captures fall back to a payment link, and a
   late stray capture is auto-refunded.
@@ -34,172 +40,81 @@ handled gracefully."*
   append-only ledger, verifiable from genesis with one command.
 - **Agent-native by an MCP server.** Claude (or any MCP client) shops
   through tools that expose no payment capability at all — only
-  browse/search/propose-mandate/request-purchase/read-orders.
+  browse, cross-store search, propose-mandate, request-purchase, and
+  read/explain-orders. There is no approve, settle, or refund tool to misuse.
 
 See [`docs/rfc.md`](docs/rfc.md) for the mandate model and how this
 compares to AP2, ACP, x402, UCP, and Reserve Pay/UAP. See
 [`docs/architecture.md`](docs/architecture.md) for the state machines,
 the rejection matrix, and the failure-recovery design.
 
-## Quickstart (judge-runnable in 2 minutes)
-
-Two paths. The **offline path** needs no accounts and proves the whole
-envelope. The **live hero path** drives Claude Desktop against a real
-Razorpay TEST-mode capture.
-
-**Prerequisites:** Node 24, pnpm 10+. `pnpm install` once.
-
-### Path 1 - offline, no accounts (fastest)
-
-```bash
-pnpm install
-# Six-stage demo: purchase, refusal, human gate, prompt-injection caught,
-# failure -> retry -> fallback-link -> stray-capture refunded, revocation.
-pnpm --filter @hundi/demo demo
-```
-
-Runs the real facilitator code (verify gate, state machine, ledger)
-against an in-memory SQLite DB and a scripted Razorpay double - no
-network call, no keys.
-
-### Path 2 - live hero flow (Claude Desktop -> real TEST-mode capture)
-
-This is the demo in [`demo/recording-script.md`](demo/recording-script.md).
-It captures a **real Razorpay TEST-mode payment** (rzp_test_...). No live
-money is ever moved; the facilitator refuses anything but test keys.
-
-1. **Configure secrets** (one-time):
-
-   ```bash
-   cp .env.example .env
-   # Fill RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET / RAZORPAY_WEBHOOK_SECRET
-   # (test mode), and DASHBOARD_TOKEN / ADMIN_TOKEN to any strong random
-   # strings. Optionally set ONBOARD_TOKEN to let the agent scan a store.
-   ```
-
-2. **Boot the facilitator** (the only process that holds Razorpay keys;
-   binds 127.0.0.1:8790, reads ../../.env):
-
-   ```bash
-   pnpm --filter @hundi/facilitator serve
-   ```
-
-   If the checkout driver reports a missing browser on first capture,
-   install Playwright's Chromium once: `pnpm --filter @hundi/facilitator exec playwright install chromium`.
-
-3. **Boot the dashboard** (the human console, Vite on :5173):
-
-   ```bash
-   pnpm --filter @hundi/dashboard dev
-   ```
-
-   Open http://localhost:5173 and paste your DASHBOARD_TOKEN (same value
-   as .env) into the dashboard's settings field.
-
-4. **Build the MCP server** and point Claude Desktop at the built entry:
-
-   ```bash
-   pnpm --filter @hundi/mcp-server build   # -> packages/mcp-server/dist/index.js
-   ```
-
-   Add to Claude Desktop's config
-   (`~/Library/Application Support/Claude/claude_desktop_config.json` on
-   macOS), using the **absolute** path to this repo:
-
-   ```json
-   {
-     "mcpServers": {
-       "hundi": {
-         "command": "node",
-         "args": ["/ABSOLUTE/PATH/TO/hundi/packages/mcp-server/dist/index.js"],
-         "env": {
-           "HUNDI_FACILITATOR_URL": "http://127.0.0.1:8790"
-         }
-       }
-     }
-   }
-   ```
-
-   `HUNDI_FACILITATOR_URL` defaults to `http://127.0.0.1:8790` if omitted.
-   Set `HUNDI_ONBOARD_TOKEN` to your `.env` `ONBOARD_TOKEN` only if you
-   want the agent to onboard stores itself. Restart Claude Desktop; the
-   `hundi` server should show connected.
-
-5. **Run the hero flow in Claude Desktop.** In the dashboard Stores tab,
-   confirm `myfrido-com` is onboarded (if not, ask the agent to
-   `onboard_store` `https://myfrido.com`). Then, in Claude Desktop:
-
-   - "What's your Hundi shopping identity, and what can you spend?"
-     -> `get_agent_identity`
-   - "Propose a mandate for myfrido-com: a Rs 5,000 budget to shop Frido,
-     hands-free." -> `prepare_mandate` returns a one-tap approve link
-   - Open the link, tap **Approve** in the dashboard (human signature).
-   - "Buy me the Frido leather sneakers, size 11UK." -> `search_products`
-     then `request_purchase` -> captured with a real Razorpay `payment_id`.
-   - "What have you bought me?" -> `list_orders`.
-
-6. **Verify the audit trail:**
-
-   ```bash
-   pnpm --filter @hundi/facilitator verify-ledger hundi.db
-   ```
-
-The full shot-by-shot narration is in
-[`demo/recording-script.md`](demo/recording-script.md); the 60-90s trust
-reel is in [`demo/trust-demo-choreography.md`](demo/trust-demo-choreography.md).
-
-> **Note for judges:** everything runs in Razorpay TEST MODE only - real
-> orders are never placed at the merchant, and only test-mode payments are
-> captured. Any GitHub-account / push caveat you may see elsewhere is a
-> maintainer workflow detail and is not relevant to running or judging this.
-
-## Quickstart (<10 minutes, no external accounts required)
-
-The default path is fully offline: a deterministic buyer agent, an
-Ed25519 signer, and an in-process facilitator with a fake Razorpay client
-that runs the *real* facilitator code (verify chain, state machine,
-retry/fallback logic) with no network call. No Anthropic key, no passkey
-hardware, no Razorpay account needed to see the whole envelope work.
+## Running it locally
 
 **Prerequisites:** Node 24, pnpm 10+.
 
 ```bash
 pnpm install
+```
 
-# Six-stage demo: purchase, refusal, human-approval gate, prompt-injection
-# caught, failure → retry → fallback-link → stray-capture refunded, revocation.
+### End to end, offline (no accounts, no keys)
+
+```bash
+# Exercises the real facilitator code — verify gate, state machine, ledger,
+# retry/fallback — against an in-memory SQLite DB and a scripted Razorpay double.
 pnpm --filter @hundi/demo demo
 
-# Batch harness: 20 scripted tasks, each with an expected terminal state,
-# generates a results table.
+# 20-task batch run, each task declaring its expected terminal state up front.
 pnpm --filter @hundi/harness harness
 ```
 
-Everything above runs against an in-memory SQLite database and a scripted
-Razorpay double — it exercises the actual facilitator code, not a mock of
-it, but it never calls Razorpay's real API.
+No network call and no credentials are involved — this runs the actual
+facilitator, not a mock of it.
 
-**To run the real thing** — a live facilitator against Razorpay test mode,
-capturing a real test-mode payment — you additionally need a Razorpay test
-account:
+### Against Razorpay test mode
+
+The facilitator is the only process that holds Razorpay keys; the dashboard is
+the human console for approvals, revocations, and refunds.
 
 ```bash
 cp .env.example .env
-# fill in RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET / RAZORPAY_WEBHOOK_SECRET
-# also set DASHBOARD_TOKEN and ADMIN_TOKEN to any random string — the
-# facilitator's boot-time env validation requires both and .env.example
-# doesn't list them yet (see packages/facilitator/src/env.ts)
+# Fill RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET / RAZORPAY_WEBHOOK_SECRET (test
+# mode) and set DASHBOARD_TOKEN / ADMIN_TOKEN to any strong random strings.
 
-pnpm --filter @hundi/facilitator smoke:settle   # drives one real capture end to end
-pnpm --filter @hundi/facilitator serve          # boots the real facilitator on :8790
-pnpm --filter @hundi/dashboard dev              # the human console, against the running facilitator
+pnpm --filter @hundi/facilitator serve     # 127.0.0.1:8790
+pnpm --filter @hundi/dashboard dev         # http://localhost:5173
 ```
 
-The live rail is Razorpay's embedded checkout, driven by Playwright,
-routed through the mock-bank ("netbanking") test flow — see
-[Payment rail reality](docs/rfc.md#payment-rail-reality) in the RFC for why,
-and [`docs/decisions/001-payment-rail.md`](docs/decisions/001-payment-rail.md)
-for the raw spike record.
+Buyer agents connect through the MCP server, which exposes only shopping
+tools — browse, cross-store search, propose-mandate, request-purchase,
+read/explain-orders — and no payment capability. Build it and point any MCP
+client at the entry:
+
+```bash
+pnpm --filter @hundi/mcp-server build      # -> packages/mcp-server/dist/index.js
+```
+
+```json
+{
+  "mcpServers": {
+    "hundi": {
+      "command": "node",
+      "args": ["/ABSOLUTE/PATH/TO/hundi/packages/mcp-server/dist/index.js"],
+      "env": { "HUNDI_FACILITATOR_URL": "http://127.0.0.1:8790" }
+    }
+  }
+}
+```
+
+The live rail is Razorpay's embedded checkout, driven by Playwright through the
+mock-bank ("netbanking") test flow — see
+[Payment rail reality](docs/rfc.md#payment-rail-reality) in the RFC for why, and
+[`docs/decisions/001-payment-rail.md`](docs/decisions/001-payment-rail.md) for
+the raw spike record. If the checkout driver reports a missing browser on first
+capture, run `pnpm --filter @hundi/facilitator exec playwright install chromium`
+once.
+
+Everything runs in Razorpay **test mode** only — the facilitator refuses to boot
+with anything but `rzp_test_` keys, and no real order is placed at the merchant.
 
 ## Verifying the audit trail
 
@@ -267,34 +182,34 @@ build most:
 
 ## Status
 
-**Built and tested** (370 tests, all green, across 34 test files):
+**Built and tested** (663 tests, all green, across 63 test files):
 facilitator (mandate registration, `/verify`, `/settlements`, approvals,
-revoke, admin, webhook, sweep, executor with retry + payment-link fallback
-+ anomaly-refund compensator), hash-chained ledger with a `verify-ledger`
-CLI, two demo stores (one server-rendered, one CLI-generated static site),
-a CLI that retrofits any schema.org store (`npx hundi init`), one
-deterministic buyer agent built on a swap-the-brain interface, a six-stage
-scripted demo, a 20-task batch harness, a dashboard (mandate ceremony,
-pending-approvals with signed decisions, live ledger, revoke), and a real
-Razorpay test-mode capture driven through the actual facilitator code
-(`pay_TTBO5gj6lma2uw`).
+revoke, human-issued refunds, admin, webhook, sweep, executor with retry +
+payment-link fallback + anomaly-refund compensator), the cumulative-wallet
+model with per-merchant sub-limits, cumulative approval lines, and signed
+`allowed_skus` purpose-locking, a hash-chained ledger with a `verify-ledger`
+CLI, an MCP server (11 shopping tools, no payment capability), two demo
+stores (one server-rendered, one CLI-generated static site), a CLI that
+retrofits any schema.org store (`npx hundi init`), buyer agents on a
+swap-the-brain interface (a deterministic policy plus an LLM tool-loop), a
+six-stage scripted demo, a 20-task batch harness, a dashboard (mandate
+ceremony, pending-approvals with signed decisions, live ledger, revoke,
+refund), and a real Razorpay test-mode capture driven through the actual
+facilitator code (`pay_TTBO5gj6lma2uw`).
 
 **Not yet built:**
 - **The passkey (WebAuthn ES256) ceremony UI.** The server-side
   verification for it is implemented and tested in `packages/core`; no
   browser signs with it yet. Today's "human" signer is a raw Ed25519
   keypair the dashboard holds, disclosed on screen, not a passkey.
-- **An LLM-driven buyer agent.** The one agent in this build is a
-  deterministic, non-LLM policy — reliable for the demo and the harness,
-  but it doesn't demonstrate an actual model making the shopping decision.
-  A Claude tool-loop agent behind the same `BuyerTools` interface is
-  scoped and pending an API key.
+- **Real merchant order placement.** A capture is a real test-mode payment,
+  but no order is created at the merchant — that's an honest test-mode gap.
+  The executor is written against a `SettleDriver` interface so a fulfilment
+  step is an addition, not a rewrite.
 - **The S2S payment rail**, if Razorpay ever grants enablement on it — the
-  executor is written against a `SettleDriver` interface specifically so a
-  second rail implementation is a swap, not a rewrite.
+  same `SettleDriver` seam makes a second rail a swap, not a rewrite.
 
-No secrets are committed to this repository. `.env` is gitignored;
-`.env.example` lists the Razorpay credential shape (see the quickstart
-above for the two additional local-only tokens it doesn't yet list). Any
+No secrets are committed to this repository. `.env` is gitignored and
+`.env.example` documents every variable the facilitator needs. Any
 key that appears on screen in a recorded demo is treated as burned and
 rotated after recording.
